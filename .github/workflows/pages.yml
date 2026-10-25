@@ -1,0 +1,66 @@
+name: Publicar STRIDE
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: stride-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          APP_VERSION: 1.2.${{ github.run_number }}
+      - run: node scripts/test-sw.mjs
+      - name: Preparar branch de publicação
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: publication
+      - name: Atualizar aplicativo e iniciar publicação
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd publication
+          git rm -r --ignore-unmatch .
+          cp -R ../dist/. .
+          mkdir -p .github/workflows
+          cp ../.github/workflows/pages.yml .github/workflows/pages.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "Publicar STRIDE $GITHUB_SHA"
+          git push origin HEAD:gh-pages
+          gh workflow run pages.yml --ref gh-pages --repo "$GITHUB_REPOSITORY"
+  deploy:
+    if: github.ref == 'refs/heads/gh-pages'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - name: Deploy no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
