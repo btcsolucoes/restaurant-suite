@@ -1,0 +1,7 @@
+const BASE=new URL('./',self.location.href);const PREFIX='stride-shell-'+BASE.pathname+'-';const CACHE=PREFIX+'e129b680fe48b5fd';const FILES=["./.nojekyll","./assets/index-2aWZcMGO.js","./assets/index-CXlWLxqI.css","./assets/workbook-Bu_7uZsO.js","./favicon.svg","./icon-192.png","./icon-512.png","./index.html","./manifest.webmanifest"];
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES.map(p=>new URL(p,BASE).href)))));
+self.addEventListener('message',e=>{if(e.data?.type==='SKIP_WAITING')self.skipWaiting();});
+self.addEventListener('activate',e=>e.waitUntil((async()=>{const keys=(await caches.keys()).filter(k=>k.startsWith(PREFIX)&&k!==CACHE);const old=keys.slice(0,-1);await Promise.all(old.map(k=>caches.delete(k)));await self.clients.claim();})()));
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==BASE.origin||!u.pathname.startsWith(BASE.pathname)||u.pathname.endsWith('/sw.js'))return;
+e.respondWith((async()=>{const cache=await caches.open(CACHE);if(e.request.mode==='navigate'){return await cache.match(new URL('index.html',BASE).href)||fetch(e.request);}
+const hit=await cache.match(e.request)||await caches.match(e.request);return hit||fetch(e.request);})());});
