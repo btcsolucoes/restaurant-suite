@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.qa/
+*.xlsx
+*.csv
+*.db
+*.sqlite*
+.env*
+upload/
+URL_DO_APLICATIVO.txt
