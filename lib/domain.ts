@@ -1,3 +1,4 @@
+import { adaptiveProposals } from './adaptive';
 export type Sheet = { name: string; rows: any[][] };
 export type Source = { filename: string; sheets: Sheet[] };
 export type Session = { id: string; date: string; day: string; week: string; title: string; prescription: string; strength: string; intensity: string; minutes: number; pace: string; target: string; runRpe: string; row: any[]; paceDetails?: any[]; brick?: any[] };
@@ -6,9 +7,10 @@ export type StrengthLog = { id: string; date: string; exercise: string; sets: {r
 export type Meal = { id: string; date: string; name: string; timing: string; calories: number|null; protein: number; carbs: number; fat: number; water: number; gi: string; notes: string; createdAt: string };
 export type Checkin = {date: string; sleep: number; recovery: number; pain: number; alert: boolean; notes: string; updatedAt: string};
 export type Override = { sessionId: string; factor: number; reason: string; createdAt: string };
-export type Decision = {id: string; status: 'approved'|'rejected'; title: string; reason: string; date: string; sessionId: string; factor: number; createdAt: string};
+export type Audit = {engineVersion?:string; rule?:string; evidence?:string; beforeFactor?:number};
+export type Decision = Audit & {id: string; status: 'approved'|'rejected'; title: string; reason: string; date: string; sessionId: string; factor: number; createdAt: string};
 export type State = { schemaVersion: 1; source: Source; archives?: {source: Source; archivedAt: string}[]; logs: TrainingLog[]; strength: StrengthLog[]; meals: Meal[]; checkins: Checkin[]; overrides: Override[]; decisions: Decision[]; settings: { stiRepaired: boolean; timezone: string }; importedAt: string };
-export type Proposal = {id: string; title: string; reason: string; sessionId: string; date: string; factor: number; level: 'warning'|'danger'|'info'};
+export type Proposal = Audit & {id: string; title: string; reason: string; sessionId: string; date: string; factor: number; level: 'warning'|'danger'|'info'};
 export const sheetRows = (s: Source, name: string) => s.sheets.find(x=>x.name === name)?.rows || [];
 export const present = (v: any) => v !== null && v !== undefined && v !== '';
 export const str = (v: any) => present(v) ? String(v) : '';
@@ -62,7 +64,7 @@ export function validateSource(source: Source) {
   if(cal.some(r=>dateKey(r[0])==='2026-12-31'&&num(r[7])===0)) warnings.push('31/12: 0 min representa duração não definida para o evento condicional, não um treino de zero minutos.');
   return {errors,warnings};
 }
-export function effective(s: State, p: Session) {const o=s.overrides.find(x=>x.sessionId===p.id);return {factor:o?.factor??1,reason:o?.reason,minutes:Math.round(p.minutes*(o?.factor??1)),runKm:present(p.paceDetails?.[3])?num(p.paceDetails?.[3])*(o?.factor??1):null,bikeKm:p.brick?num(p.brick[2]):null};}
+export function effective(s: State, p: Session) {const o=s.overrides.find(x=>x.sessionId===p.id);return {factor:o?.factor??1,reason:o?.reason,minutes:Math.round(p.minutes*(o?.factor??1)),runKm:present(p.paceDetails?.[3])?num(p.paceDetails?.[3])*(o?.factor??1):p.brick?num(p.brick[3])*(o?.factor??1):null,bikeKm:p.brick?num(p.brick[2])*(o?.factor??1):null};}
 export function pace(distance: number, minutes: number) {if(!(distance>0&&minutes>0))return '—';const sec=Math.round(minutes/distance*60);return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');}
 export function speed(distance: number, minutes: number) {return distance>0&&minutes>0?Math.round(distance/minutes*600)/10:0;}
 export const volume = (l: StrengthLog) => l.sets.reduce((a,v)=>a+v.reps*v.kg,0);
@@ -79,24 +81,7 @@ export function adherence(s: State, start: string, end: string) {
   });
   return {done,total:planned.length,percent:planned.length?Math.round(done/planned.length*100):0};
 }
-export function proposals(s: State, date=today(s.settings.timezone)): Proposal[] {
-  const upcoming=sessions(s.source).filter(p=>p.date>=date&&p.date<=addDays(date,7)&&/corrida/i.test(p.title)&&!/simulado|evento/i.test(p.title)&&![5,6].includes(new Date(p.date+'T12:00:00Z').getUTCDay()));
-  const next=upcoming[0]; if(!next)return [];
-  const logs=s.logs.filter(l=>l.date>=addDays(date,-3)&&l.date<=date&&l.status==='completed');
-  const c=s.checkins.filter(c=>c.date>=addDays(date,-2)&&c.date<=date).sort((a,b)=>b.date.localeCompare(a.date))[0];
-  let p: Proposal|undefined;
-  const painful=logs.find(l=>l.pain>=4);
-  if(c?.alert||num(c?.pain)>=4||painful) p={id:`pain:${next.id}:${c?.updatedAt||painful?.id}`,sessionId:next.id,date:next.date,factor:0,level:'danger',title:'Pausar a próxima corrida',reason:'Dor ≥4/10 ou sinal de alerta registrado. Proposta de pausa e avaliação antes de retomar. Sinais agudos exigem interrupção imediata, independentemente da aprovação no app.'};
-  else if((c&&(c.recovery<=2||c.sleep<6))||logs.some(l=>(l.rpe??0)>=8))p={id:`fatigue:${next.id}:${c?.updatedAt||logs.find(l=>(l.rpe??0)>=8)?.id}`,sessionId:next.id,date:next.date,factor:0.8,level:'warning',title:'Reduzir 20% do volume da próxima corrida',reason:'Recuperação baixa, sono <6 h ou RPE ≥8 recente. Reduzir duração/distância e manter esforço confortável. Esta regra conservadora não é uma zona fisiológica medida.'};
-  else {
-    const last14=s.logs.filter(l=>l.date>=addDays(date,-14)&&l.date<date&&l.kind==='run'&&l.status==='completed');
-    const checks=s.checkins.filter(c=>c.date>=addDays(date,-14)&&c.date<date);
-    const long=upcoming.find(p=>/longa/i.test(p.title)&&!['S4','S8','S10'].includes(p.week));
-    if(long&&date<'2026-12-13'&&last14.length>=4&&last14.every(l=>l.pain===0&&l.rpe!==null&&l.rpe<=6)&&checks.length>=10&&checks.every(c=>!c.alert&&c.pain===0&&c.recovery>=3&&c.sleep>=6)&&adherence(s,addDays(date,-14),addDays(date,-1)).percent>=80)
-      p={id:`progress:${long.id}`,sessionId:long.id,date:long.date,factor:1.05,level:'info',title:'Avaliar mais 5% de volume no longão',reason:'Duas semanas registradas sem dor, esforço controlado e aderência ≥80%. Proposta limitada a uma corrida fácil; sem acelerar pace. Requer sua aprovação e pode ser recusada.'};
-  }
-  return p&&!s.decisions.some(d=>d.id===p!.id)&&!s.overrides.some(o=>o.sessionId===p!.sessionId)?[p]:[];
-}
+export const proposals = adaptiveProposals;
 function fail(msg: string): never {throw new Error(msg);}
 function bounded(v: any, min: number,max: number,label: string) {if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max)fail(`${label}: valor entre ${min} e ${max}.`);return v;}
 function text(v: any, max=2000) {if(typeof v!=='string'||v.length>max)fail('Texto inválido ou muito longo.');return v;}
@@ -122,7 +107,7 @@ export function validateBackup(d: State){
   if(d.archives&&(!Array.isArray(d.archives)||d.archives.length>8||d.archives.some(a=>validateSource(a.source).errors.length)))fail('Archives inválidos.');
   d.logs.forEach(l=>validateLog(l,d));d.strength.forEach(validateStrength);d.meals.forEach(validateMeal);d.checkins.forEach(validateCheckin);
   for(const key of ['logs','strength','meals'] as const)if(new Set(d[key].map(v=>v.id)).size!==d[key].length)fail('Identificadores duplicados no backup.');
-  d.overrides.forEach(o=>{text(o.sessionId,100);bounded(o.factor,0,1.05,'Fator de ajuste');text(o.reason);const p=sessions(d.source).find(p=>p.id===o.sessionId);if(!p||!/corrida/i.test(p.title)||/simulado|evento/i.test(p.title))fail('Ajuste fora das corridas permitidas.');});
+  d.overrides.forEach(o=>{text(o.sessionId,100);bounded(o.factor,0,1.05,'Fator de ajuste');text(o.reason);const p=sessions(d.source).find(p=>p.id===o.sessionId);if(!p)fail('Sessão do ajuste não encontrada.');});
   d.decisions.forEach(v=>{id(v.id);text(v.title);text(v.reason);validDate(v.date);if(!['approved','rejected'].includes(v.status))fail('Decisão inválida.');});
   if(!d.settings||typeof d.settings.stiRepaired!=='boolean')fail('Configurações inválidas.');try{today(d.settings.timezone);}catch{fail('Fuso horário inválido.');}
 }
@@ -144,7 +129,7 @@ export function applyAction(original: State, action: string, d: any, date=today(
     const p=proposals(s,date).find(p=>p.id===d.id);if(!p)fail('Proposta expirada. Atualize os dados.');
     if(!['approved','rejected'].includes(d.status))fail('Decisão inválida.');
     s.decisions.push({...p,status:d.status,createdAt:stamp});
-    if(d.status==='approved')s.overrides.push({sessionId:p.sessionId,factor:p.factor,reason:p.reason,createdAt:stamp});
+    if(d.status==='approved'){s.overrides=s.overrides.filter(o=>o.sessionId!==p.sessionId);s.overrides.push({sessionId:p.sessionId,factor:p.factor,reason:p.reason,createdAt:stamp});}
   }
   else if(action==='undo'){const o=s.overrides.find(x=>x.sessionId===d.sessionId);if(!o)fail('Ajuste não encontrado.');s.overrides=s.overrides.filter(x=>x.sessionId!==d.sessionId);s.decisions.push({id:crypto.randomUUID(),status:'approved',title:'Restaurar planejamento original',reason:'Restauração solicitada pelo usuário.',sessionId:d.sessionId,date, factor:1,createdAt:stamp});}
   else fail('Ação desconhecida.');

@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { Source, State, validateSource, validateBackup, macrosKcal, pace, speed, volume } from './domain';
 export async function parseWorkbook(file: File|{name:string;arrayBuffer:()=>Promise<ArrayBuffer>;size:number}){
-  if(!/\.xlsx$/i.test(file.name))throw new Error('Selecione um arquivo .xlsx.');
+  if(!/\.(xlsx|csv)$/i.test(file.name))throw new Error('Selecione um arquivo .xlsx ou .csv.');
   if(file.size>10*1024*1024)throw new Error('O limite por arquivo é 10 MB.');
   const w=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false,sheetRows:5002});
   if(w.SheetNames.length>40)throw new Error('Limite de 40 abas.');
@@ -15,7 +15,7 @@ export async function parseWorkbook(file: File|{name:string;arrayBuffer:()=>Prom
   const source:Source={filename:file.name,sheets:w.SheetNames.map(name=>{
     const ws=w.Sheets[name];const range=ws['!ref']?XLSX.utils.decode_range(ws['!ref']):null;
     if(range&&(range.e.r>=5000||range.e.c>=100))throw new Error(`${name}: a aba excede 5.000 linhas ou 100 colunas.`);
-    return {name,rows:XLSX.utils.sheet_to_json<any[]>(ws,{header:1,defval:null,blankrows:true,raw:true})};
+    return {name:/\.csv$/i.test(file.name)?'Calendario':name,rows:XLSX.utils.sheet_to_json<any[]>(ws,{header:1,defval:null,blankrows:true,raw:true})};
   })};
   return {source,backup:null,validation:validateSource(source)};
 }

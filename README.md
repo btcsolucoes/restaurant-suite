@@ -53,3 +53,7 @@ npm run dev
 `scripts/build-sw.mjs` gera o precache a partir dos arquivos compilados, incluindo o leitor XLSX para uso offline. Mantém o cache anterior durante uma transição entre abas; só remove caches deste mesmo caminho de instalação. Nunca exclui ou recria o IndexedDB.
 
 `scripts/test.mjs` verifica importação, persistência após nova abertura/versão, concorrência, registros, cálculos, adaptações e restauração exata de backup. A validação da planilha e todas as regras continuam funcionando sem servidor. Nenhuma alteração de carga é aplicada sem aprovação.
+
+## Adaptação contínua
+
+Consulte [ADAPTACAO.md](ADAPTACAO.md) para regras, auditoria, projeções condicionais, CSV inicial, compatibilidade de dados e validação. A importação configura o plano; ajustes posteriores são aprovados diretamente no aplicativo.
