@@ -1,4 +1,4 @@
-import {addDays,dateKey,sessions,sheetRows,today,type State,type Source} from './domain';
+import {addDays,dateKey,sessions,sheetRows,today,effective,type State,type Source} from './domain';
 
 export type AthleteProfile={goalDate:string;runKm:number;bikeKm:number;runPaceSeconds:number;bikeSpeed:number;weeklyRunMinutes:number;longRunMinutes:number;bikeMinutes:number;strengthMinutes:number;anchor:string};
 export type WeekDecision={id:string;start:string;status:'approved'|'rejected'|'undone';createdAt:string;reason:string;before?:Source;beforeOverrides?:State['overrides'];after?:string};
@@ -26,9 +26,10 @@ const exercises=[
  ['Qui','Elevação lateral',2,'12–20'],['Qui','Tríceps polia',2,'10–15'],
  ['Sex','Supino inclinado',3,'8–12'],['Sex','Remada apoiada',3,'8–12'],['Sex','Desenvolvimento halteres',2,'8–12'],['Sex','Elevação lateral',2,'12–20'],
  ['Sáb','Puxada frontal',2,'8–12'],['Sáb','Crucifixo inverso',2,'12–20'],['Sáb','Dead bug',2,'8/lado']];
-export function weekProposal(s:State,date=today(s.settings.timezone)){
+export function weekProposal(s:State,date=today(s.settings.timezone),scope:'current'|'next'='next'){
  const p=s.profile;if(!p)return null;validateProfile(p);
- const start=nextMonday(date),end=addDays(start,6);if(start>p.goalDate)return null;
+ const monday=scope==='current'?addDays(date,-((new Date(date+'T12:00:00Z').getUTCDay()+6)%7)):nextMonday(date);
+ const start=scope==='current'?date:monday,end=addDays(monday,6);if(start>p.goalDate)return null;
  const logs=s.logs.filter(l=>l.status==='completed'&&l.date>=addDays(date,-28)&&l.date<=date);
  const recent=logs.filter(l=>l.date>=addDays(date,-7));
  const checks=s.checkins.filter(c=>c.date>=addDays(date,-7)&&c.date<=date);
@@ -44,7 +45,7 @@ export function weekProposal(s:State,date=today(s.settings.timezone)){
  const baseline=runs.length>=3?Math.min(...twoWeeks):p.weeklyRunMinutes;
  const runLong=runs.length?Math.max(...runs.map(l=>l.duration)):p.longRunMinutes;
  const bikeLong=bikes.length?Math.max(...bikes.map(l=>l.duration)):p.bikeMinutes;
- const cycle=Math.max(0,Math.floor((Date.parse(start)-Date.parse(p.anchor))/604800000));
+ const cycle=Math.max(0,Math.floor((Date.parse(monday)-Date.parse(p.anchor))/604800000));
  const taper=Math.round((Date.parse(p.goalDate)-Date.parse(start))/86400000)<=13;
  const deload=!taper&&cycle%4===3;
  const factor=pause?0:reduce?.65:taper?.6:deload?.75:eligible?1.1:1;
@@ -69,17 +70,26 @@ export function weekProposal(s:State,date=today(s.settings.timezone)){
  const guidance='Concluir com técnica estável; registrar duração, distância, RPE, dor e recuperação no dia seguinte. Parar se dor crescer ou alterar passada. Se houver piora depois, repetir/reduzir; não compensar treino perdido.';
  const fueling='Manter dieta do nutricionista. Em sessões >75–90 min, praticar 30–60 g carboidrato/h conforme tolerância. Hidratar por sede e condições; não forçar excesso de água.';
  const totals={run:0,bike:0,strength:0};
+ // A partial-week revision must account for completed runs and retained past sessions.
+ const retainedRun=scope==='current'?Array.from({length:7},(_,i)=>addDays(monday,i)).filter(dt=>dt<start).reduce((sum,dt)=>{
+  const actual=s.logs.filter(l=>l.date===dt&&l.kind==='run'&&l.status==='completed').reduce((n,l)=>n+l.duration,0);
+  const planned=sessions(s.source).filter(x=>x.date===dt).reduce((n,x)=>{const target=Number(x.paceDetails?.[13]);return n+(Number.isFinite(target)&&target>0?target:/corrida|simulado/i.test(x.title)?effective(s,x).minutes:0);},0);
+  return sum+Math.max(actual,planned);
+ },0):0;
+ let remainingRun=Math.max(0,budget-retainedRun);
  for(let i=0;i<7;i++){
-  const dt=addDays(start,i);if(dt>p.goalDate)break;
+  const dt=addDays(start,i);if(dt>p.goalDate||dt>end)break;
   const dow=new Date(dt+'T12:00:00Z').getUTCDay(),day=days[dow],week=`P${cycle+1}`;
   const force=pause||dow===0?0:Math.round(([2,4].includes(dow)?20:dow===3?20:dow===6?25:p.strengthMinutes)*Math.min(1,factor));
   const forceText=pause?'Pausa por recuperação':exercises.filter(x=>x[0]===day).map(x=>`${x[1]} ${deload||taper||reduce?1:x[2]}×${x[3]}`).join('; ');
-  const dose=forceText+(dow===3?'. RIR 4; reduzir antes do longão.':'. RIR 2–3; sábado RIR 4. Descanso 60–120 s. Sem falha.');
+  const dose=forceText+(dow===3?'. RIR 4, sem falha; descanso 60–120 s. Dose inicial de readaptação: reavaliar após registrar dor e recuperação, não é volume definitivo.':'. RIR 2–3; sábado RIR 4. Descanso 60–120 s. Sem falha.');
   let name='Musculação '+day,run=0,bike=0,main='5 min de aquecimento + '+dose+'; terminar antes do limite de tempo.',intensity='Força RIR 2–3';
-  if(dow===2){name=title+' + musculação';run=quality;main=actualQuality?`10 min fáceis; ${blocks}; completar fácil até ${quality-5} min; 5 min fáceis finais. Total ${quality} min de corrida, incluindo recuperações.`:`${run} min totais fáceis, primeiros e últimos 5 min bem leves.`;intensity=actualQuality?'Corrida RPE 3–4; blocos 6–7':'Corrida RPE 3–4';}
+  if(dow===2){name=title+' + musculação';run=Math.min(quality,remainingRun);main=actualQuality?`10 min fáceis; ${blocks}; completar fácil até ${quality-5} min; 5 min fáceis finais. Total ${quality} min de corrida, incluindo recuperações.`:`${run} min totais fáceis, primeiros e últimos 5 min bem leves.`;intensity=actualQuality?'Corrida RPE 3–4; blocos 6–7':'Corrida RPE 3–4';}
   if(dow===3){bike=midBike;name='Bike aeróbica + musculação de pernas';main=`${bike} min bike RPE 3–4; primeiros e últimos 5 min leves. Pernas: ${dose}`;intensity='Bike RPE 3–4';}
-  if(dow===4){run=long;name='Corrida LONGÃO + musculação leve';main=`${run} min totais a RPE 3–4, sem final forte; primeiros e últimos 5 min bem leves. Pode intercalar 9 min corrida / 1 min caminhada dentro do total. Depois força curta: ${dose}`;intensity='Corrida RPE 3–4';}
-  if(dow===0){run=brick;bike=sundayBike;name='Simulado bike + corrida';main=`${bike} min bike RPE 3–4 (primeiros/últimos 10% leves); T2 até 5 min; ${run} min corrida RPE 3–4 começando mais leve. Não é prova semanal.`;intensity='Ambas RPE 3–4';}
+  if(dow===4){run=Math.min(long,remainingRun);name='Corrida LONGÃO + musculação leve';main=`${run} min totais a RPE 3–4, sem final forte; primeiros e últimos 5 min bem leves. Pode intercalar 9 min corrida / 1 min caminhada dentro do total. Depois força curta: ${dose}`;intensity='Corrida RPE 3–4';}
+  if(dow===0){run=Math.min(brick,remainingRun);bike=sundayBike;name='Simulado bike + corrida';main=`${bike} min bike RPE 3–4 (primeiros/últimos 10% leves); T2 até 5 min; ${run} min corrida RPE 3–4 começando mais leve. Não é prova semanal.`;intensity='Ambas RPE 3–4';}
+  if(dow===2&&run<quality){main=`${run} min fáceis RPE 3–4; volume limitado pelo restante da semana.`;intensity='Corrida RPE 3–4';name='Corrida fácil + musculação';}
+  remainingRun-=run;
   if(pause){name=dow===0?'Simulado: pausa por recuperação':'Musculação e cardio: pausa por recuperação';main=reason;}
   const mechanical=bike?(s.settings.stiRepaired?'Bike revisada informada; confirmar demais itens de segurança.':'STI pendente: usar indoor com resistência funcional; distância do painel não equivale à rua. Não prescrever pedal de estrada exigente até reparo.'):' ';
   const minutes=run+bike+force+(dow===0&&!pause?5:0);
@@ -100,15 +110,16 @@ export function weekProposal(s:State,date=today(s.settings.timezone)){
  let ms=source.sheets.find(x=>x.name==='Musculacao');if(!ms){ms={name:'Musculacao',rows:[strength[0]]};source.sheets.push(ms);}
  // Date-specific rows coexist with historical weekday routines.
  ms.rows=ms.rows.filter((r,i)=>i===0||!(dateKey(r[6])>=start&&dateKey(r[6])<=end));ms.rows.push(...strength.slice(1));
- const token=digest({date,profile:p,logs:s.logs,checkins:s.checkins,strength:s.strength,source:s.source,overrides:s.overrides});
+ const token=digest({date,scope,profile:p,logs:s.logs,checkins:s.checkins,strength:s.strength,source:s.source,overrides:s.overrides});
  const id=`week:${start}:${token}`;
  const locked=s.logs.some(l=>l.date>=start&&l.date<=end)||s.strength.some(l=>l.date>=start&&l.date<=end);
- return {id,start,end,reason,source,totals,eligible,deload,taper,pause,locked,decided:!!s.weekDecisions?.some(x=>x.id===id||(x.start===start&&x.status==='approved'&&x.after===digest({source:s.source,overrides:s.overrides}))),quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
+ return {id,start,end,scope,retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,locked,decided:!!s.weekDecisions?.some(x=>x.id===id||(x.start===start&&x.status==='approved'&&x.after===digest({source:s.source,overrides:s.overrides}))),quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
 }
 export function applyWeekAction(s:State,action:string,d:any,date:string){
  if(action==='profile'){validateProfile(d);s.profile={...d,anchor:s.profile?.anchor||date};return;}
  if(action==='week-decision'){
-  const p=weekProposal(s,date);if(!p||p.id!==d.id||p.decided||p.locked)throw Error('Proposta expirada ou semana já registrada. Gere uma nova prévia.');
+  if(d.scope!==undefined&&!['current','next'].includes(d.scope))throw Error('Período inválido.');
+  const p=weekProposal(s,date,d.scope||'next');if(!p||p.id!==d.id||p.decided||p.locked)throw Error('Proposta expirada ou semana já registrada. Gere uma nova prévia.');
   if(!['approved','rejected'].includes(d.status))throw Error('Decisão inválida.');
   const entry:WeekDecision={id:p.id,start:p.start,status:d.status,createdAt:new Date().toISOString(),reason:p.reason+' '+p.evidence};
   if(d.status==='approved'){entry.before=structuredClone(s.source);entry.beforeOverrides=structuredClone(s.overrides);s.source=p.source;const ids=sessions(s.source).filter(x=>x.date>=p.start&&x.date<=p.end).map(x=>x.id);s.overrides=s.overrides.filter(o=>!ids.includes(o.sessionId));entry.after=digest({source:s.source,overrides:s.overrides});}
