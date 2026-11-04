@@ -1,15 +1,16 @@
 import { adaptiveProposals } from './adaptive';
+import {applyWeekAction, validateProfile, type AthleteProfile, type WeekDecision} from './planner';
 export type Sheet = { name: string; rows: any[][] };
 export type Source = { filename: string; sheets: Sheet[] };
 export type Session = { id: string; date: string; day: string; week: string; title: string; prescription: string; strength: string; intensity: string; minutes: number; pace: string; target: string; runRpe: string; row: any[]; paceDetails?: any[]; brick?: any[] };
-export type TrainingLog = { id: string; date: string; sessionId: string; sessionLabel?: string; kind: 'run'|'bike'|'strength'|'other'; status: 'completed'|'skipped'; distance: number; duration: number; hr: number|null; rpe: number|null; pain: number; notes: string; createdAt: string };
+export type TrainingLog = { id: string; date: string; sessionId: string; sessionLabel?: string; environment?:'outdoor'|'indoor'|'unknown'; workoutType?:'easy'|'interval'|'fartlek'|'tempo'|'long'|'brick'|'unknown'; kind: 'run'|'bike'|'strength'|'other'; status: 'completed'|'skipped'; distance: number; duration: number; hr: number|null; rpe: number|null; pain: number; notes: string; createdAt: string };
 export type StrengthLog = { id: string; date: string; exercise: string; sets: {reps: number; kg: number}[]; notes: string; createdAt: string };
 export type Meal = { id: string; date: string; name: string; timing: string; calories: number|null; protein: number; carbs: number; fat: number; water: number; gi: string; notes: string; createdAt: string };
 export type Checkin = {date: string; sleep: number; recovery: number; pain: number; alert: boolean; notes: string; updatedAt: string};
 export type Override = { sessionId: string; factor: number; reason: string; createdAt: string };
 export type Audit = {engineVersion?:string; rule?:string; evidence?:string; beforeFactor?:number};
 export type Decision = Audit & {id: string; status: 'approved'|'rejected'; title: string; reason: string; date: string; sessionId: string; factor: number; createdAt: string};
-export type State = { schemaVersion: 1; source: Source; archives?: {source: Source; archivedAt: string}[]; logs: TrainingLog[]; strength: StrengthLog[]; meals: Meal[]; checkins: Checkin[]; overrides: Override[]; decisions: Decision[]; settings: { stiRepaired: boolean; timezone: string }; importedAt: string };
+export type State = { schemaVersion: 1; profile?:AthleteProfile; weekDecisions?:WeekDecision[]; source: Source; archives?: {source: Source; archivedAt: string}[]; logs: TrainingLog[]; strength: StrengthLog[]; meals: Meal[]; checkins: Checkin[]; overrides: Override[]; decisions: Decision[]; settings: { stiRepaired: boolean; timezone: string }; importedAt: string };
 export type Proposal = Audit & {id: string; title: string; reason: string; sessionId: string; date: string; factor: number; level: 'warning'|'danger'|'info'};
 export const sheetRows = (s: Source, name: string) => s.sheets.find(x=>x.name === name)?.rows || [];
 export const present = (v: any) => v !== null && v !== undefined && v !== '';
@@ -64,7 +65,7 @@ export function validateSource(source: Source) {
   if(cal.some(r=>dateKey(r[0])==='2026-12-31'&&num(r[7])===0)) warnings.push('31/12: 0 min representa duração não definida para o evento condicional, não um treino de zero minutos.');
   return {errors,warnings};
 }
-export function effective(s: State, p: Session) {const o=s.overrides.find(x=>x.sessionId===p.id);return {factor:o?.factor??1,reason:o?.reason,minutes:Math.round(p.minutes*(o?.factor??1)),runKm:present(p.paceDetails?.[3])?num(p.paceDetails?.[3])*(o?.factor??1):p.brick?num(p.brick[3])*(o?.factor??1):null,bikeKm:p.brick?num(p.brick[2])*(o?.factor??1):null};}
+export function effective(s: State, p: Session) {const o=s.overrides.find(x=>x.sessionId===p.id);return {factor:o?.factor??1,reason:o?.reason,minutes:Math.round(p.minutes*(o?.factor??1)),runKm:present(p.paceDetails?.[3])?num(p.paceDetails?.[3])*(o?.factor??1):present(p.brick?.[3])?num(p.brick![3])*(o?.factor??1):null,bikeKm:present(p.brick?.[2])?num(p.brick![2])*(o?.factor??1):null};}
 export function pace(distance: number, minutes: number) {if(!(distance>0&&minutes>0))return '—';const sec=Math.round(minutes/distance*60);return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');}
 export function speed(distance: number, minutes: number) {return distance>0&&minutes>0?Math.round(distance/minutes*600)/10:0;}
 export const volume = (l: StrengthLog) => l.sets.reduce((a,v)=>a+v.reps*v.kg,0);
@@ -75,7 +76,7 @@ export function adherence(s: State, start: string, end: string) {
   planned.forEach(p=>{
     const logs=s.logs.filter(l=>l.sessionId===p.id&&l.status==='completed');
     const isBrick=/simulado|evento/i.test(p.title);
-    const cardio=isBrick?logs.some(l=>l.kind==='bike')&&logs.some(l=>l.kind==='run'):logs.some(l=>/muscula/i.test(p.title)?l.kind==='strength':/bike/i.test(p.title)?l.kind==='bike':l.kind==='run');
+    const cardio=isBrick?logs.some(l=>l.kind==='bike')&&logs.some(l=>l.kind==='run'):logs.some(l=>/corrida/i.test(p.title)?l.kind==='run':/bike/i.test(p.title)?l.kind==='bike':/muscula/i.test(p.title)?l.kind==='strength':l.kind==='run');
     const weights=p.strength&&p.strength!=='—'?s.strength.some(x=>x.date===p.date)||logs.some(l=>l.kind==='strength'):true;
     if(cardio&&weights)done++;
   });
@@ -90,6 +91,8 @@ function id(v: any){return text(v,100);}
 export function validateLog(d: TrainingLog,s: State) {
   id(d.id);validDate(d.date);text(d.notes);
   if(!['run','bike','strength','other'].includes(d.kind)||!['completed','skipped'].includes(d.status))fail('Tipo de registro inválido.');
+  if(d.environment!==undefined&&!['outdoor','indoor','unknown'].includes(d.environment))fail('Ambiente inválido.');
+  if(d.workoutType!==undefined&&!['easy','interval','fartlek','tempo','long','brick','unknown'].includes(d.workoutType))fail('Tipo de treino inválido.');
   bounded(d.distance,0,1000,'Distância');bounded(d.duration,0,3000,'Duração');bounded(d.pain,0,10,'Dor');
   if(d.rpe!==null)bounded(d.rpe,1,10,'RPE');if(d.hr!==null)bounded(d.hr,20,260,'Frequência cardíaca');
   if(d.status==='completed'&&d.duration<=0)fail('Informe a duração realizada.');
@@ -102,7 +105,10 @@ export function validateMeal(d: Meal){id(d.id);validDate(d.date);text(d.name,150
 export function validateCheckin(d: Checkin){validDate(d.date);bounded(d.sleep,0,24,'Sono');bounded(d.recovery,1,5,'Recuperação');bounded(d.pain,0,10,'Dor');text(d.notes);if(typeof d.alert!=='boolean')fail('Sinal de alerta inválido.');}
 export function validateBackup(d: State){
   if(d?.schemaVersion!==1)fail('Versão de backup incompatível.');
-  const v=validateSource(d.source);if(v.errors.length)fail(v.errors.join(' '));
+  if(d.profile)validateProfile(d.profile);
+  if(d.weekDecisions&&(!Array.isArray(d.weekDecisions)||d.weekDecisions.length>24))fail('Histórico semanal inválido.');
+  d.weekDecisions?.forEach(w=>{id(w.id);validDate(w.start);if(!['approved','rejected','undone'].includes(w.status)||typeof w.reason!=='string'||w.reason.length>20000)fail('Decisão semanal inválida.');if(w.before&&validateSource(w.before).errors.some(e=>e!=='Nenhuma sessão com data válida.'))fail('Fonte anterior inválida.');});
+  const v=validateSource(d.source);const sourceErrors=v.errors.filter(e=>e!=='Nenhuma sessão com data válida.');if(sourceErrors.length)fail(sourceErrors.join(' '));
   for(const key of ['logs','strength','meals','checkins','overrides','decisions'] as const)if(!Array.isArray(d[key])||d[key].length>20000)fail('Estrutura do backup inválida.');
   if(d.archives&&(!Array.isArray(d.archives)||d.archives.length>8||d.archives.some(a=>validateSource(a.source).errors.length)))fail('Archives inválidos.');
   d.logs.forEach(l=>validateLog(l,d));d.strength.forEach(validateStrength);d.meals.forEach(validateMeal);d.checkins.forEach(validateCheckin);
@@ -114,7 +120,8 @@ export function validateBackup(d: State){
 function upsert<T extends {id:string}>(list:T[],d:T){const i=list.findIndex(x=>x.id===d.id);if(i<0)list.push(d);else list[i]=d;}
 export function applyAction(original: State, action: string, d: any, date=today(original.settings.timezone)): State {
   const s:State=JSON.parse(JSON.stringify(original)), stamp=new Date().toISOString();
-  if(action==='training'){validateLog(d,s);upsert(s.logs,{...d,createdAt:stamp});}
+  if(['profile','week-decision','week-undo'].includes(action))applyWeekAction(s,action,d,date);
+  else if(action==='training'){validateLog(d,s);upsert(s.logs,{...d,createdAt:stamp});}
   else if(action==='strength'){validateStrength(d);upsert(s.strength,{...d,createdAt:stamp});}
   else if(action==='meal'){validateMeal(d);upsert(s.meals,{...d,createdAt:stamp});}
   else if(action==='checkin'){validateCheckin(d);s.checkins=s.checkins.filter(c=>c.date!==d.date);s.checkins.push({...d,updatedAt:stamp});}

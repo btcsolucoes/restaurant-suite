@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
-    "test": "node scripts/test.mjs && node scripts/test-adaptive.mjs"
+    "test": "node scripts/test.mjs && node scripts/test-adaptive.mjs && node scripts/test-planner.mjs"
   },
   "dependencies": {
     "lucide-react": "1.31.0",

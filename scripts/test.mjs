@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';import {indexedDB,IDBKeyRange} from 'fake-indexeddb';
 globalThis.indexedDB=indexedDB;globalThis.IDBKeyRange=IDBKeyRange;
 fs.mkdirSync('.qa',{recursive:true});
-for(const name of ['domain','adaptive','local-store','workbook']){let code=ts.transpileModule(fs.readFileSync(`lib/${name}.ts`,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replaceAll("'./adaptive'","'./adaptive.mjs'").replaceAll("'./domain'","'./domain.mjs'");fs.writeFileSync(`.qa/${name}.mjs`,code);}
+for(const name of ['domain','adaptive','planner','local-store','workbook']){let code=ts.transpileModule(fs.readFileSync(`lib/${name}.ts`,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replaceAll("'./adaptive'","'./adaptive.mjs'").replaceAll("'./domain'","'./domain.mjs'").replaceAll("'./planner'","'./planner.mjs'");fs.writeFileSync(`.qa/${name}.mjs`,code);}
 const d=await import('../.qa/domain.mjs'),store=await import('../.qa/local-store.mjs'),book=await import('../.qa/workbook.mjs');
 const date=d.today(),dow=new Date(date+'T12:00:00Z').getUTCDay(),nextRun=d.addDays(date,(2-dow+7)%7);
 const source={filename:'plano-teste.xlsx',sheets:[{name:'Calendario',rows:[['Data','Dia','Semana','Sessão','Treino prescrito','Musculação','Intensidade','Min estimados'],[nextRun,'Ter','S1','Corrida longa','6 km leve','—','RPE 3–4',45]]},{name:'Paces por Corrida',rows:[['Data','Semana','Sessão','Distância corrida (km)'],[nextRun,'S1','Longa',6]]}]};
