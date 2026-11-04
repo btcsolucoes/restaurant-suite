@@ -26,3 +26,14 @@ exportBackup(approved);const parsed=await parseWorkbook(new File([await captured
 assert.throws(()=>applyAction(s,'profile',{...s.profile,longRunMinutes:100},date));
 const boundary=weekProposal(s,'2026-12-27');assert.equal(boundary.summary.length,4);assert(boundary.taper);assert.equal(weekProposal(s,'2027-01-01'),null);
 console.log('PASS: native onboarding, immutable week preview, six strength days, Sunday brick, stale approval, rejection, undo, recorded-week lock, progression evidence, pain pause, goal boundary, matched performance and complete XLSX backup.');
+
+// Revising the current week preserves earlier plans and accounts for their running load.
+const wed='2026-11-04';let partial=initialState({filename:'legacy.xlsx',sheets:[{name:'Calendario',rows:[empty.sheets[0].rows[0],['2026-11-03','Ter','S1','Corrida fácil','20 min','—','RPE 3',20],[wed,'Qua','S1','Bike + pernas','Bike','Leg press 1 × 10','RPE 3',60]]}]});
+partial=applyAction(partial,'profile',defaultProfile(wed),wed);
+const current=weekProposal(partial,wed,'current');assert.equal(current.start,wed);assert.equal(current.end,'2026-11-08');assert.equal(current.summary.length,5);assert.equal(current.retainedRun,20);assert(current.totals.run+current.retainedRun<=current.budget);assert(current.summary[0][5].includes('Flexora 2×'));
+const fixed=applyAction(partial,'week-decision',{id:current.id,scope:'current',status:'approved'},wed);assert.deepEqual(fixed.source.sheets[0].rows[1],partial.source.sheets[0].rows[1]);assert.equal(fixed.source.sheets.find(x=>x.name==='Musculacao').rows.filter(r=>r[6]===wed).length,4);validateBackup(fixed);
+const restored=applyAction(fixed,'week-undo',{id:current.id},wed);assert.deepEqual(restored.source,partial.source);
+assert.throws(()=>applyAction(partial,'week-decision',{id:current.id,scope:'next',status:'approved'},wed));
+assert.equal(weekProposal(partial,'2026-11-08','current').summary.length,1);
+partial.logs.push(log('already',wed,'bike'));assert(weekProposal(partial,wed,'current').locked);
+console.log('PASS: current-week revision, Sunday boundary, retained load, dated strength, undo and scope validation.');
