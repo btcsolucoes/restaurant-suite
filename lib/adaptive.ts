@@ -41,6 +41,7 @@ export function adaptiveProposals(s:State,date=today(s.settings.timezone)):Propo
     result.push({id,sessionId:p.id,date:p.date,factor,level:factor===0?'danger':factor<1?'warning':'info',title:`${factor===0?'Pausar':factor<1?'Reduzir volume de':'Progredir duração de'} ${p.title}`,reason,engineVersion:ENGINE_VERSION,rule,evidence:JSON.stringify(evidence),beforeFactor:current});
   }
   // Only one progression can be displayed at a time; approval recalculates budgets.
+  if(s.profile)return result.filter(p=>p.factor<=1);
   let increase=false;return result.filter(p=>p.factor<=1||(!increase&&(increase=true)));
 }
 
