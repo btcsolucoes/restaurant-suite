@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {initialState,applyAction,sessions,validateBackup,addDays,proposals,adherence,effective} from '../.qa/domain.mjs';
-import {defaultProfile,weekProposal,runningTrend,planRepairs,paceCalibration} from '../.qa/planner.mjs';
+import {defaultProfile,weekProposal,runningTrend,planRepairs,paceCalibration,kilometreStep} from '../.qa/planner.mjs';
 import {parseWorkbook,exportBackup} from '../.qa/workbook.mjs';
 const date='2026-11-08',empty={filename:'empty',sheets:[{name:'Calendario',rows:[['Data','Dia','Semana','Sessão','Treino prescrito','Musculação','Intensidade','Min estimados']]}]};
 let s=initialState(empty);assert.equal(weekProposal(s,date),null);
@@ -93,8 +93,28 @@ const differentGoal=structuredClone(calibratedState);differentGoal.profile.runPa
 for(const invalid of [{environment:'indoor'},{workoutType:'interval'},{pain:1},{date:addDays(date,1)},{rpe:null}]){const bad=structuredClone(calibratedState);bad.logs=bad.logs.map(l=>({...l,...invalid}));assert.equal(paceCalibration(bad,date).ready,false);}
 const duplicates=structuredClone(calibratedState);duplicates.logs=duplicates.logs.map(l=>({...l,date}));assert.equal(paceCalibration(duplicates,date).ready,false);
 const faster=structuredClone(calibratedState);faster.logs.push(...[15,17,19].map(i=>({...log('older'+i,addDays(date,-i)),environment:'outdoor',workoutType:'easy',distance:30*60/380})));
-assert.equal(paceCalibration(faster,date).low,375);
+assert.equal(paceCalibration(faster,date).low,365);
 const slower=structuredClone(calibratedState);slower.logs=slower.logs.map(l=>({...l,distance:4}));assert.equal(paceCalibration(slower,date).low,450);
 assert.notEqual(weekProposal(slower,date).id,cp.id);assert.throws(()=>applyAction(slower,'week-decision',{id:cp.id,status:'approved'},date),/expirada/);
 assert.deepEqual(applyAction(calibratedSaved,'week-undo',{id:cp.id},date).source,calibratedState.source);
 console.log('PASS calibration: observed pace, numeric km, no goal substitution, insufficient/invalid data, distinct days, faster cap, slowdown, approval and undo.');
+
+const stepState=structuredClone(s);stepState.logs=[];
+for(const [dow,km] of [[2,10],[4,18],[5,6],[0,6]]){const dt=addDays('2026-11-02',(dow+6)%7);stepState.logs.push({...log('step'+dow,dt,'run',km*6),distance:km});}
+const stepOk=kilometreStep(stepState,date,'2026-11-09',264,true);assert(stepOk.accepted);assert.equal(stepOk.total,264);assert.deepEqual(stepOk.entries.map(e=>e.km),[11,19,7,7]);
+assert(!kilometreStep(stepState,date,'2026-11-09',263,true).accepted);
+assert(!kilometreStep(stepState,date,'2026-11-09',264,false).accepted);
+assert(!kilometreStep({...stepState,logs:stepState.logs.slice(1)},date,'2026-11-09',264,true).accepted);
+assert(!kilometreStep({...stepState,logs:stepState.logs.map(l=>({...l,pain:1}))},date,'2026-11-09',264,true).accepted);
+for(const l of [...stepState.logs])stepState.logs.push({...l,id:l.id+'prior',date:addDays(l.date,-7)});
+stepState.checkins=[0,1,2,3].map(i=>({date:addDays(date,-i),sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:''}));
+const stepWeek=weekProposal(stepState,date);assert(stepWeek.step.accepted);assert.equal(stepWeek.totals.run,264);assert.equal(stepWeek.totals.runKm,44);
+const stepSaved=applyAction(stepState,'week-decision',{id:stepWeek.id,status:'approved'},date);validateBackup(stepSaved);assert(weekProposal(stepSaved,date).decided,'repeat preview must not stack kilometres');
+assert(!weekProposal(stepState,date,'current').step.accepted);
+console.log('PASS requested progression: exact kilometre steps, total budget, incomplete records, pain, phase/partial-week gate, approval and no stacking.');
+
+assert(!stepWeek.quality.includes('×'),'distance-step week must not add fast blocks');
+const futureRecorded=structuredClone(stepState);futureRecorded.logs.push({...log('future','2026-11-10'),status:'skipped'});assert(!weekProposal(futureRecorded,date).step.accepted);
+const limitedState=structuredClone(stepState);limitedState.logs=limitedState.logs.map(l=>({...l,distance:l.distance/4,duration:l.duration/4}));assert(!weekProposal(limitedState,date).step.accepted,'four extra kilometres must not bypass the existing weekly load budget');
+const discharge=structuredClone(stepState);discharge.profile.anchor='2026-10-19';assert(weekProposal(discharge,date).deload);assert(!weekProposal(discharge,date).step.accepted);
+const taperStep=structuredClone(stepState);taperStep.profile.goalDate='2026-11-20';assert(!weekProposal(taperStep,date).step.accepted);
