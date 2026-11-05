@@ -1,4 +1,4 @@
-const BASE=new URL('./',self.location.href);const PREFIX='stride-shell-'+BASE.pathname+'-';const CACHE=PREFIX+'bf95e9276498f647';const FILES=["./.nojekyll","./assets/index-B1ROELvm.css","./assets/index-BoL1WVSi.js","./assets/workbook-Dm3mM2xQ.js","./favicon.svg","./icon-192.png","./icon-512.png","./index.html","./manifest.webmanifest"];
+const BASE=new URL('./',self.location.href);const PREFIX='stride-shell-'+BASE.pathname+'-';const CACHE=PREFIX+'b833f1bc73b8b7f5';const FILES=["./.nojekyll","./assets/index-B1ROELvm.css","./assets/index-vz44H4-j.js","./assets/workbook-CWNsnEGX.js","./favicon.svg","./icon-192.png","./icon-512.png","./index.html","./manifest.webmanifest"];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES.map(p=>new Request(new URL(p,BASE).href,{cache:'reload'}))))));
 self.addEventListener('message',e=>{if(e.data?.type==='SKIP_WAITING')self.skipWaiting();});
 self.addEventListener('activate',e=>e.waitUntil((async()=>{const keys=(await caches.keys()).filter(k=>k.startsWith(PREFIX)&&k!==CACHE);const old=keys.slice(0,-1);await Promise.all(old.map(k=>caches.delete(k)));await self.clients.claim();})()));
