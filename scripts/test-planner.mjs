@@ -44,3 +44,10 @@ const declined=applyAction(partial,'week-decision',{id:remaining.id,scope:'curre
 validateBackup(kept);assert.throws(()=>validateBackup({...kept,weekDecisions:[{...kept.weekDecisions[0],dates:['invalid']}]}));
 
 console.log('PASS: current-week revision, Sunday boundary, retained load, dated strength, undo and scope validation.');
+// Recovery must be explained and must never overwrite a week with zero sessions.
+const recovery=structuredClone(s);recovery.logs=[log('old-pain','2026-11-06')];recovery.logs[0].pain=4;
+let held=weekProposal(recovery,date);assert(held.pause&&held.locked);assert(held.reason.includes('2026-11-06'));assert.throws(()=>applyAction(recovery,'week-decision',{id:held.id,status:'approved'},date));
+recovery.checkins=[{date,sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:''}];assert(!weekProposal(recovery,date).pause);
+recovery.checkins[0].alert=true;assert(weekProposal(recovery,date).pause);recovery.checkins[0].alert=false;
+recovery.logs[0].date=date;assert(weekProposal(recovery,date).pause);
+console.log('PASS: recovery evidence, no whole-week pause writes, newer check-in reevaluation, same-day pain and alerts retained.');

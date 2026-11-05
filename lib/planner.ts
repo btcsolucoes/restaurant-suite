@@ -34,7 +34,9 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const recent=logs.filter(l=>l.date>=addDays(date,-7));
  const checks=s.checkins.filter(c=>c.date>=addDays(date,-7)&&c.date<=date);
  const latest=checks.slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
- const pause=recent.some(l=>l.pain>=4)||checks.some(c=>c.alert||c.pain>=4);
+ const recoverySignals=[...recent.filter(l=>l.pain>=4).map(l=>({date:l.date,detail:`Treino: dor ${l.pain}/10`,alert:false})),...checks.filter(c=>c.alert||c.pain>=4).map(c=>({date:c.date,detail:c.alert?'Check-in: sinal de alerta marcado':`Check-in: dor ${c.pain}/10`,alert:c.alert}))];
+ const unresolvedSignals=recoverySignals.filter(signal=>signal.alert||!latest||latest.date!==date||latest.date<=signal.date||latest.alert||latest.pain>0);
+ const pause=unresolvedSignals.length>0;
  const reduce=!pause&&(recent.some(l=>l.pain>2)||checks.some(c=>c.pain>2||c.sleep<6||c.recovery<=2));
  const runs=logs.filter(l=>l.kind==='run'),bikes=logs.filter(l=>l.kind==='bike');
  // Require observations across two weeks. Missing data never enables progression.
@@ -56,7 +58,7 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const bikeProgress=eligible&&bikes.filter(l=>l.date>=addDays(date,-14)).length>=3&&!(eligible&&long>runLong);
  const sundayBike=pause?0:Math.min(210,Math.round(bikeLong*(bikeProgress?1.1:Math.min(1,factor))));
  const midBike=pause?0:Math.round(Math.min(60,bikeLong*.5)*Math.min(1,factor));
- const reason=pause?'Alerta ou dor ≥4: semana de pausa proposta; reavaliar antes de retomar.':reduce?'Sintomas ou recuperação baixa: reduzir e retirar intensidade.':taper?'Redução antes da data-alvo.':deload?'Semana de descarga: reduzir duração e séries.':eligible?'Duas semanas com registros e recuperação: aumentar apenas resistência de corrida; manter dose rápida e bike.':'Consolidar: dados insuficientes ou recuperação ainda sem evidência para aumento. Complete diário e check-ins.';
+ const reason=pause?'Reavaliação necessária: '+unresolvedSignals.map(x=>x.date+' — '+x.detail).join('; ')+'. O app não substituirá a semana por pausas. Confira o registro e atualize o check-in; sinais de alerta exigem avaliação antes de retomar.':reduce?'Sintomas ou recuperação baixa: reduzir e retirar intensidade.':taper?'Redução antes da data-alvo.':deload?'Semana de descarga: reduzir duração e séries.':eligible?'Duas semanas com registros e recuperação: aumentar apenas resistência de corrida; manter dose rápida e bike.':'Consolidar: dados insuficientes ou recuperação ainda sem evidência para aumento. Complete diário e check-ins.';
  const qualityOK=!pause&&!reduce&&!taper&&!deload&&quality>=28&&completeChecks&&recent.every(l=>l.pain===0)&&checks.every(c=>c.pain===0)&&runs.length>=3;
  const variant=cycle%3;
  const blocks=qualityOK?(variant===0?'6 × 1 min a RPE 6–7, 90 s fáceis ENTRE repetições':variant===1?'Fartlek 4 × (2 min a RPE 6 + 2 min fáceis)':'Tempo fracionado 2 × 5 min a RPE 6, 3 min fáceis entre blocos'):'Corrida fácil a RPE 3–4, conversa em frases completas; sem blocos rápidos nesta proposta';
@@ -114,8 +116,8 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const token=digest({date,scope,profile:p,logs:s.logs,checkins:s.checkins,strength:s.strength,source:s.source,overrides:s.overrides});
  const id=`week:${start}:${token}`;
  const dates=cal.slice(1).map(r=>String(r[0]));
- const locked=dates.length===0;
- return {id,start,end,scope,dates,protectedDates:[...protectedDates],retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,locked,decided:!!s.weekDecisions?.some(x=>(x.id===id&&x.status==='approved')||(x.start===start&&x.status==='approved'&&x.after===digest({source:s.source,overrides:s.overrides}))),quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
+ const locked=dates.length===0||pause;
+ return {id,start,end,scope,dates,protectedDates:[...protectedDates],retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,locked,decided:!pause&&digest(source)===digest(s.source),recoverySignals,unresolvedSignals,quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
 }
 export function applyWeekAction(s:State,action:string,d:any,date:string){
  if(action==='profile'){validateProfile(d);s.profile={...d,anchor:s.profile?.anchor||date};return;}
