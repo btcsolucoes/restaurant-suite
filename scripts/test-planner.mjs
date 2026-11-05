@@ -79,3 +79,5 @@ fs.writeFileSync('.qa/weekly-planner.mjs',ui);const {default:WeeklyPlanner,PlanR
 const repairHtml=renderToStaticMarkup(React.createElement(PlanRepair,{s:stable,now:date,busy:false,save:async()=>true}));assert(repairHtml.includes('Restaurar este treino'));assert(!repairHtml.includes('disabled=""'));
 const html=renderToStaticMarkup(React.createElement(WeeklyPlanner,{s:stable,now:date,busy:false,save:async()=>true}));assert(html.includes('Aplicar estes treinos'));assert(!html.includes('disabled=""'));
 console.log('PASS UI: saved pause exposes restore action, review exposes enabled apply action. Server rendering only; no phone-browser claim.');
+const sixDays=weekProposal(s,date);assert(sixDays.summary[0][3].startsWith('Musculação'));assert(sixDays.summary[4][3].includes('Corrida'));assert(sixDays.summary[5][3].includes('Bike'));assert.equal(sixDays.totals.run,70);assert.equal(sixDays.totals.bike,90);
+const fri=sessions(sixDays.source).find(x=>x.date==='2026-11-13');validateBackup(applyAction({...s,source:sixDays.source},'training',{...log('friday',fri.date),sessionId:fri.id},date));
