@@ -18,6 +18,18 @@ export function runningTrend(s:State,date:string){
  const previous=pairs.reduce((n,x)=>n+x.b.duration/x.b.distance,0)/pairs.length,current=pairs.reduce((n,x)=>n+x.a.duration/x.a.distance,0)/pairs.length;
  return {previous,current,count:pairs.length,change:(previous-current)/previous*100};
 }
+// Observed easy pace is not a race prediction or lactate threshold.
+export function paceCalibration(s:State,date:string){
+ const eligible=s.logs.filter(l=>l.status==='completed'&&l.kind==='run'&&l.environment==='outdoor'&&l.workoutType==='easy'&&l.pain===0&&l.rpe!==null&&l.rpe>=3&&l.rpe<=4&&l.distance>0&&l.duration>=20&&l.duration<=60&&l.date<=date&&l.date>=addDays(date,-27));
+ const recent=eligible.filter(l=>l.date>=addDays(date,-13)),older=eligible.filter(l=>l.date<addDays(date,-13));
+ if(new Set(recent.map(l=>l.date)).size<3)return {ready:false as const,count:recent.length,reason:'Registre corridas fáceis em 3 dias distintos, ao ar livre, de 20–60 min, RPE 3–4 e sem dor nos últimos 14 dias para calibrar distância e ritmo.'};
+ const median=(a:number[])=>{const sorted=a.slice().sort((a,b)=>a-b),i=Math.floor(sorted.length/2);return sorted.length%2?sorted[i]:(sorted[i-1]+sorted[i])/2;};
+ const observed=median(recent.map(l=>l.duration*60/l.distance));
+ const before=older.length>=3?median(older.map(l=>l.duration*60/l.distance)):observed;
+ const low=Math.round(Math.max(observed,before-5)),high=low+20;
+ const fmt=(sec:number)=>Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+ return {ready:true as const,count:recent.length,low,high,label:fmt(low)+'–'+fmt(high),reason:'Referência de corridas fáceis registradas, não limiar. Recalibração limitada a 5 s/km mais rápida que a quinzena anterior quando há dados; regra operacional, não garantia fisiológica. RPE 3–4 prevalece sobre o pace.'};
+}
 const days=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const exercises=[
  ['Seg','Supino reto',3,'6–10'],['Seg','Remada apoiada',3,'8–12'],['Seg','Elevação lateral',3,'12–20'],['Seg','Tríceps polia',2,'10–15'],
@@ -74,7 +86,8 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const nutrition:any[][]=[['Data','Dia','Semana','Sessão','Pré','Durante','Pós']];
  const guidance='Concluir com técnica estável; registrar duração, distância, RPE, dor e recuperação no dia seguinte. Parar se dor crescer ou alterar passada. Se houver piora depois, repetir/reduzir; não compensar treino perdido.';
  const fueling='Manter dieta do nutricionista. Em sessões >75–90 min, praticar 30–60 g carboidrato/h conforme tolerância. Hidratar por sede e condições; não forçar excesso de água.';
- const totals={run:0,bike:0,strength:0};
+ const calibration=paceCalibration(s,date);
+ const totals={run:0,bike:0,strength:0,runKm:0};
  // A partial-week revision must account for completed runs and retained past sessions.
  const protectedDates=new Set([...s.logs.map(l=>l.date),...s.strength.map(l=>l.date)].filter(dt=>dt>=start&&dt<=end));
  const retainedRun=Array.from({length:7},(_,i)=>addDays(monday,i)).filter(dt=>dt<start||protectedDates.has(dt)).reduce((sum,dt)=>{
@@ -103,9 +116,13 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
   remainingRun-=run;
   const mechanical=bike?(s.settings.stiRepaired?'Bike revisada informada; confirmar demais itens de segurança.':'STI pendente: usar indoor com resistência funcional; distância do painel não equivale à rua. Não prescrever pedal de estrada exigente até reparo.'):' ';
   const minutes=run+bike+force+(dow===0&&!pause?5:0);
-  cal.push([dt,day,week,name,`${main}\n${guidance}\n${mechanical}\n${fueling}`,dow===0?'—':dose,intensity,minutes,null,null,reason,'Por RPE e fala; pace observado no diário, sem limiar presumido',run||'',actualQuality&&dow===2?'6–7 nos blocos':'3–4']);
-  if(run)paces.push([dt,week,name,null,'Primeiros 5–10 min leves','RPE 2–3',main,intensity,actualQuality&&dow===2?blocks:'Sem intervalo obrigatório','RPE 2–3','Últimos 5 min leves','RPE 2–3',run,run,actualQuality&&dow===2?'6–7':'3–4',guidance]);
-  if(dow===0)bricks.push([dt,week,null,null,main,fueling,guidance]);
+  const calibrated=calibration.ready&&!reduce&&!needsReview&&run>0&&!(dow===2&&actualQuality);
+  const runKm=calibrated?Math.floor(run*60/calibration.high*10)/10:null;
+  const paceLabel=calibrated?calibration.label:'Por RPE; ritmo numérico ainda não calibrado';
+  if(runKm!==null){main+=` Meta de corrida: ${runKm.toFixed(1)} km, com limite de ${run} min; encerrar no primeiro limite. Referência fácil ${paceLabel} min/km; reduzir o ritmo se necessário para manter RPE ${dow===5?'2–3':'3–4'}. Na transição e no longão, o esforço prevalece.`;totals.runKm+=runKm;}
+  cal.push([dt,day,week,name,`${main}\n${guidance}\n${mechanical}\n${fueling}`,dow===0?'—':dose,intensity,minutes,null,null,reason,paceLabel,run||'',actualQuality&&dow===2?'6–7 nos blocos':dow===5?'2–3':'3–4']);
+  if(run)paces.push([dt,week,name,runKm,'Primeiros 5–10 min leves','RPE 2–3',main,paceLabel,actualQuality&&dow===2?blocks:'Sem intervalo obrigatório','RPE 2–3','Últimos 5 min leves','RPE 2–3',run,run,actualQuality&&dow===2?'6–7':dow===5?'2–3':'3–4',guidance]);
+  if(dow===0)bricks.push([dt,week,null,runKm,main,fueling,guidance]);
   if(dow!==0)for(const x of exercises.filter(x=>x[0]===day))strength.push([day,x[1],pause?0:deload||taper||reduce?1:x[2],x[3],dow===3||dow===6?'RIR 4':'RIR 2–3','60–120 s',dt]);
   nutrition.push([dt,day,week,name,'Refeição habitual com carboidrato, conforme tolerância',fueling,'Refeição com carboidrato e proteína']);
   totals.run+=run;totals.bike+=bike;totals.strength+=force;
@@ -124,7 +141,7 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const id=`week:${start}:${token}`;
  const dates=cal.slice(1).map(r=>String(r[0]));
  const locked=dates.length===0;
- return {id,start,end,scope,dates,protectedDates:[...protectedDates],retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,needsReview,locked,decided:!pause&&digest(source)===digest(s.source)&&!s.overrides.some(o=>sessions(s.source).some(x=>x.id===o.sessionId&&dates.includes(x.date))),recoverySignals,unresolvedSignals,quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
+ return {id,start,end,scope,dates,calibration,protectedDates:[...protectedDates],retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,needsReview,locked,decided:!pause&&digest(source)===digest(s.source)&&!s.overrides.some(o=>sessions(s.source).some(x=>x.id===o.sessionId&&dates.includes(x.date))),recoverySignals,unresolvedSignals,quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
 }
 export function applyWeekAction(s:State,action:string,d:any,date:string){
  if(action==='profile'){validateProfile(d);s.profile={...d,anchor:s.profile?.anchor||date};return;}
