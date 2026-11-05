@@ -16,7 +16,7 @@ const log=(id,day,kind='run',duration=30)=>({id,date:day,sessionId:'',kind,statu
 let rich=structuredClone(s);rich.profile.weeklyRunMinutes=90;
 for(let i=0;i<14;i++){rich.checkins.push({date:addDays(date,-i),sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:String(i)});if(i%2===0)rich.logs.push(log('r'+i,addDays(date,-i)));}
 let grow=weekProposal(rich,date);assert(grow.eligible);assert(grow.totals.run<=Math.min(90,120)*1.1);assert(grow.quality.includes('×'));assert(grow.summary.find(r=>r[1]==='Qua')[4].includes('indoor'));
-rich.logs.push({...log('pain',date),pain:4});const paused=weekProposal(rich,date);assert(paused.pause);assert.equal(paused.totals.run+paused.totals.bike+paused.totals.strength,0);
+rich.logs.push({...log('pain',date),pain:4});const paused=weekProposal(rich,date);assert(paused.needsReview);assert(!paused.locked);assert(paused.totals.run+paused.totals.bike+paused.totals.strength>0);
 const future=log('future',p.start);let locked={...s,logs:[future]};assert(!weekProposal(locked,date).locked);assert(!weekProposal(locked,date).dates.includes(p.start));
 const planned=sessions(approved.source)[0];approved=applyAction(approved,'training',{...log('completed',planned.date,'strength',40),sessionId:planned.id},date);assert.throws(()=>applyAction(approved,'week-undo',{id:p.id},date),/desfazer/);
 const tue=sessions(approved.source)[1];let mixed=applyAction(approved,'training',{...log('tue-run',tue.date),sessionId:tue.id},date);assert.equal(adherence(mixed,tue.date,tue.date).done,0);mixed=applyAction(mixed,'training',{...log('tue-strength',tue.date,'strength',20),sessionId:tue.id},date);assert.equal(adherence(mixed,tue.date,tue.date).done,1);assert.equal(effective(mixed,tue).runKm,null);
@@ -46,8 +46,10 @@ validateBackup(kept);assert.throws(()=>validateBackup({...kept,weekDecisions:[{.
 console.log('PASS: current-week revision, Sunday boundary, retained load, dated strength, undo and scope validation.');
 // Recovery must be explained and must never overwrite a week with zero sessions.
 const recovery=structuredClone(s);recovery.logs=[log('old-pain','2026-11-06')];recovery.logs[0].pain=4;
-let held=weekProposal(recovery,date);assert(held.pause&&held.locked);assert(held.reason.includes('2026-11-06'));assert.throws(()=>applyAction(recovery,'week-decision',{id:held.id,status:'approved'},date));
-recovery.checkins=[{date,sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:''}];assert(!weekProposal(recovery,date).pause);
-recovery.checkins[0].alert=true;assert(weekProposal(recovery,date).pause);recovery.checkins[0].alert=false;
-recovery.logs[0].date=date;assert(weekProposal(recovery,date).pause);
+let held=weekProposal(recovery,date);assert(held.needsReview&&!held.locked);assert(held.reason.includes('2026-11-06'));const appliedRecovery=applyAction(recovery,'week-decision',{id:held.id,status:'approved'},date);validateBackup(appliedRecovery);
+recovery.checkins=[{date,sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:''}];assert(!weekProposal(recovery,date).needsReview);
+recovery.checkins[0].alert=true;assert(weekProposal(recovery,date).needsReview);recovery.checkins[0].alert=false;
+recovery.logs[0].date=date;assert(weekProposal(recovery,date).needsReview);
 console.log('PASS: recovery evidence, no whole-week pause writes, newer check-in reevaluation, same-day pain and alerts retained.');
+
+const dayReview=structuredClone(s);dayReview.checkins=[{date:'2026-11-04',sleep:8,recovery:3,pain:4,alert:false,notes:'',updatedAt:''}];const sameDay=weekProposal(dayReview,'2026-11-04','current');assert(!sameDay.locked);assert.equal(sameDay.summary[0][7],0);assert(sameDay.summary[0][3].includes('reavaliar'));assert(sameDay.summary.slice(1).some(r=>r[7]>0));
