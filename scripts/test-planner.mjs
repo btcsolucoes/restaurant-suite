@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {initialState,applyAction,sessions,validateBackup,addDays,proposals,adherence,effective} from '../.qa/domain.mjs';
-import {defaultProfile,weekProposal,runningTrend,planRepairs} from '../.qa/planner.mjs';
+import {defaultProfile,weekProposal,runningTrend,planRepairs,paceCalibration} from '../.qa/planner.mjs';
 import {parseWorkbook,exportBackup} from '../.qa/workbook.mjs';
 const date='2026-11-08',empty={filename:'empty',sheets:[{name:'Calendario',rows:[['Data','Dia','Semana','Sessão','Treino prescrito','Musculação','Intensidade','Min estimados']]}]};
 let s=initialState(empty);assert.equal(weekProposal(s,date),null);
@@ -81,3 +81,20 @@ const html=renderToStaticMarkup(React.createElement(WeeklyPlanner,{s:stable,now:
 console.log('PASS UI: saved pause exposes restore action, review exposes enabled apply action. Server rendering only; no phone-browser claim.');
 const sixDays=weekProposal(s,date);assert(sixDays.summary[0][3].startsWith('Musculação'));assert(sixDays.summary[4][3].includes('Corrida'));assert(sixDays.summary[5][3].includes('Bike'));assert.equal(sixDays.totals.run,70);assert.equal(sixDays.totals.bike,90);
 const fri=sessions(sixDays.source).find(x=>x.date==='2026-11-13');validateBackup(applyAction({...s,source:sixDays.source},'training',{...log('friday',fri.date),sessionId:fri.id},date));
+
+// Calibration uses actual easy runs, never the goal or a mixed interval average.
+assert.equal(paceCalibration(s,date).ready,false);
+const calibratedState=structuredClone(s);
+calibratedState.logs=[1,3,5].map(i=>({...log('cal'+i,addDays(date,-i)),environment:'outdoor',workoutType:'easy',distance:5}));
+let cp=weekProposal(calibratedState,date);assert(cp.calibration.ready);assert.equal(cp.calibration.label,'6:00–6:20');assert(cp.totals.runKm>0);
+const calibratedSaved=applyAction(calibratedState,'week-decision',{id:cp.id,status:'approved'},date);validateBackup(calibratedSaved);
+assert(sessions(calibratedSaved.source).filter(x=>x.target).every(x=>effective(calibratedSaved,x).runKm>0));
+const differentGoal=structuredClone(calibratedState);differentGoal.profile.runPaceSeconds=240;assert.deepEqual(paceCalibration(differentGoal,date),cp.calibration);
+for(const invalid of [{environment:'indoor'},{workoutType:'interval'},{pain:1},{date:addDays(date,1)},{rpe:null}]){const bad=structuredClone(calibratedState);bad.logs=bad.logs.map(l=>({...l,...invalid}));assert.equal(paceCalibration(bad,date).ready,false);}
+const duplicates=structuredClone(calibratedState);duplicates.logs=duplicates.logs.map(l=>({...l,date}));assert.equal(paceCalibration(duplicates,date).ready,false);
+const faster=structuredClone(calibratedState);faster.logs.push(...[15,17,19].map(i=>({...log('older'+i,addDays(date,-i)),environment:'outdoor',workoutType:'easy',distance:30*60/380})));
+assert.equal(paceCalibration(faster,date).low,375);
+const slower=structuredClone(calibratedState);slower.logs=slower.logs.map(l=>({...l,distance:4}));assert.equal(paceCalibration(slower,date).low,450);
+assert.notEqual(weekProposal(slower,date).id,cp.id);assert.throws(()=>applyAction(slower,'week-decision',{id:cp.id,status:'approved'},date),/expirada/);
+assert.deepEqual(applyAction(calibratedSaved,'week-undo',{id:cp.id},date).source,calibratedState.source);
+console.log('PASS calibration: observed pace, numeric km, no goal substitution, insufficient/invalid data, distinct days, faster cap, slowdown, approval and undo.');
