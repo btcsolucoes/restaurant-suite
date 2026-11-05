@@ -1,5 +1,5 @@
 import { adaptiveProposals } from './adaptive';
-import {applyWeekAction, validateProfile, type AthleteProfile, type WeekDecision} from './planner';
+import {applyWeekAction, restoreSession, validateProfile, type AthleteProfile, type WeekDecision} from './planner';
 export type Sheet = { name: string; rows: any[][] };
 export type Source = { filename: string; sheets: Sheet[] };
 export type Session = { id: string; date: string; day: string; week: string; title: string; prescription: string; strength: string; intensity: string; minutes: number; pace: string; target: string; runRpe: string; row: any[]; paceDetails?: any[]; brick?: any[] };
@@ -121,6 +121,7 @@ function upsert<T extends {id:string}>(list:T[],d:T){const i=list.findIndex(x=>x
 export function applyAction(original: State, action: string, d: any, date=today(original.settings.timezone)): State {
   const s:State=JSON.parse(JSON.stringify(original)), stamp=new Date().toISOString();
   if(['profile','week-decision','week-undo'].includes(action))applyWeekAction(s,action,d,date);
+  else if(action==='session-restore')restoreSession(s,d,date);
   else if(action==='training'){validateLog(d,s);upsert(s.logs,{...d,createdAt:stamp});}
   else if(action==='strength'){validateStrength(d);upsert(s.strength,{...d,createdAt:stamp});}
   else if(action==='meal'){validateMeal(d);upsert(s.meals,{...d,createdAt:stamp});}

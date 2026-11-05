@@ -18,7 +18,7 @@ export function adaptiveProposals(s:State,date=today(s.settings.timezone)):Propo
     if(s.logs.some(l=>l.sessionId===p.id&&l.status==='completed'))continue;
     const kind=modality(p), current=effective(s,p).factor;
     let rule='',factor=current,reason='';
-    if(pain){rule='pain';factor=0;reason='Dor ≥4/10 ou alerta nos registros recentes. Pausa proposta para reavaliar antes de retomar.';}
+    if(pain&&p.date===date){rule='pain';factor=0;reason='Dor ≥4/10 ou alerta nos registros recentes. Pausa proposta para reavaliar antes de retomar.';}
     else if(fatigue&&p.date<=addDays(date,2)){rule='fatigue';factor=Math.min(current,.8);reason='Sono <6 h, recuperação ≤2/5 ou RPE ≥8 recente, considerando todas as modalidades. Reduzir volume e manter esforço confortável.';}
     else if(p.date<=addDays(date,1)&&recent.filter(l=>l.date>=addDays(date,-2)&&(l.rpe??0)>=7).length>=2){rule='intensity';factor=Math.min(current,.8);reason='Duas sessões com RPE ≥7 nos últimos três dias. Redução para separar esforços intensos entre modalidades.';}
     else if(current===1&&kind!=='brick'&&p.minutes>0&&p.date<'2026-12-13'&&!['S4','S8','S10'].includes(p.week)&&!/tiro|interval|forte|limiar|ritmo/i.test(p.title+' '+p.intensity)&&!(kind==='bike'&&!s.settings.stiRepaired)){

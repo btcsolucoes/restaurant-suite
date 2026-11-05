@@ -1,5 +1,5 @@
 import {useState,type FormEvent} from 'react';
-import {defaultProfile,weekProposal,runningTrend,type AthleteProfile} from '../lib/planner';
+import {defaultProfile,planRepairs,weekProposal,runningTrend,type AthleteProfile} from '../lib/planner';
 import {addDays,pace,proposals,effective,sessions,type State} from '../lib/domain';
 
 type Props={s:State;now:string;busy:boolean;onCheckin?:()=>void;save:(action:string,data:any)=>Promise<boolean>};
@@ -27,4 +27,9 @@ export default function WeeklyPlanner({s,now,busy,save,onCheckin}:Props){
  </details><details className="planner-disclosure"><summary>Histórico de semanas</summary>{s.weekDecisions?.length?s.weekDecisions.slice().reverse().map(x=><div className="proposal" key={x.id}><strong>{x.start} · {x.status==='approved'?'Aprovada':x.status==='rejected'?'Recusada':'Desfeita'}</strong><details><summary>Motivo e evidências</summary><p>{x.reason}</p></details>{x.status==='approved'&&<button className="text-btn" disabled={busy} onClick={()=>save('week-undo',{id:x.id})}>Desfazer esta semana</button>}</div>):<p>Nenhuma decisão semanal ainda.</p>}</details>
  </>}
  </section>;
+}
+
+export function PlanRepair({s,now,busy,save}:Props){
+ const repairs=planRepairs(s,now);if(!repairs.length)return null;
+ return <section className="card spaced"><h2>Pausas salvas no seu calendário</h2><p>Atualizar o aplicativo não remove decisões já salvas. Confira a origem de cada pausa abaixo.</p>{repairs.map(r=><details className="planner-day" key={r.id}><summary>{new Date(r.date+'T12:00:00').toLocaleDateString('pt-BR')} · {r.cause}</summary>{r.original?<><p>Plano anterior: <strong>{r.original.title} · {r.original.minutes} min</strong></p><details><summary>Ver treino antes de restaurar</summary><p>{r.original.prescription}</p><p>{r.original.strength}</p></details></>:<p>Não há treino anterior recuperável neste aparelho. Revise a proposta em Minha semana; o app não vai inventar um treino.</p>}{r.canRestore?<button className="btn secondary" disabled={busy} onClick={()=>save('session-restore',{id:r.id,token:r.token})}>Restaurar este treino</button>:r.original&&<p>Este dia tem registros e será preservado.</p>}</details>)}<p className="muted">Restaurar recupera o planejamento, não confirma aptidão para executá-lo. Dor atual ou sinais de alerta continuam exigindo reavaliação.</p></section>;
 }
