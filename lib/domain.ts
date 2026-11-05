@@ -54,7 +54,6 @@ export function validateSource(source: Source) {
       if(!d) errors.push(`Calendario, linha ${i+2}: data inválida.`);
       if(!str(r[3]).trim())errors.push(`Calendario, linha ${i+2}: sessão sem nome.`);
       if(!Number.isFinite(Number(r[7]))||num(r[7])<0)errors.push(`Calendario, linha ${i+2}: minutos inválidos.`);
-      if(d){const dow=new Date(d+'T12:00:00Z').getUTCDay(); if([5,6].includes(dow)&&!/muscula|descanso/i.test(str(r[3])))warnings.push(`${d}: atividade fora da regra de sexta/sábado. Fonte preservada, revisar antes de treinar.`);}
     });
   }
   if(!cal.slice(1).some(r=>dateKey(r[0])))errors.push('Nenhuma sessão com data válida.');
@@ -98,7 +97,6 @@ export function validateLog(d: TrainingLog,s: State) {
   if(d.status==='completed'&&d.duration<=0)fail('Informe a duração realizada.');
   const p=sessions(s.source).find(p=>p.id===d.sessionId);
   if(d.sessionId&&(!p||p.date!==d.date))fail('Sessão não corresponde à data.');
-  if(p&&[5,6].includes(new Date(d.date+'T12:00:00Z').getUTCDay())&&d.kind!=='strength')fail('Sexta e sábado: o planejamento aceita apenas musculação. Registre atividade extra sem vincular à sessão.');
 }
 export function validateStrength(d: StrengthLog) {id(d.id);validDate(d.date);text(d.exercise,150);text(d.notes);if(!d.exercise.trim()||!Array.isArray(d.sets)||!d.sets.length||d.sets.length>30)fail('Informe exercício e séries válidas.');d.sets.forEach(x=>{bounded(x.reps,1,200,'Repetições');if(!Number.isInteger(x.reps))fail('Repetições devem ser inteiras.');bounded(x.kg,0,600,'Carga');});}
 export function validateMeal(d: Meal){id(d.id);validDate(d.date);text(d.name,150);text(d.timing,50);text(d.gi,500);text(d.notes);if(!d.name.trim())fail('Informe a refeição.');['protein','carbs','fat','water'].forEach(k=>bounded((d as any)[k],0,20000,k));if(d.calories!==null)bounded(d.calories,0,20000,'Calorias');}
