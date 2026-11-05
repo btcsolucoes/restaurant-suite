@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {initialState,applyAction,sessions,validateBackup,addDays,proposals,adherence,effective} from '../.qa/domain.mjs';
-import {defaultProfile,weekProposal,runningTrend} from '../.qa/planner.mjs';
+import {defaultProfile,weekProposal,runningTrend,planRepairs} from '../.qa/planner.mjs';
 import {parseWorkbook,exportBackup} from '../.qa/workbook.mjs';
 const date='2026-11-08',empty={filename:'empty',sheets:[{name:'Calendario',rows:[['Data','Dia','Semana','Sessão','Treino prescrito','Musculação','Intensidade','Min estimados']]}]};
 let s=initialState(empty);assert.equal(weekProposal(s,date),null);
@@ -53,3 +53,29 @@ recovery.logs[0].date=date;assert(weekProposal(recovery,date).needsReview);
 console.log('PASS: recovery evidence, no whole-week pause writes, newer check-in reevaluation, same-day pain and alerts retained.');
 
 const dayReview=structuredClone(s);dayReview.checkins=[{date:'2026-11-04',sleep:8,recovery:3,pain:4,alert:false,notes:'',updatedAt:''}];const sameDay=weekProposal(dayReview,'2026-11-04','current');assert(!sameDay.locked);assert.equal(sameDay.summary[0][7],0);assert(sameDay.summary[0][3].includes('reavaliar'));assert(sameDay.summary.slice(1).some(r=>r[7]>0));
+
+// Audit regressions: saved overlays survive updates, sparse logs, mixed sessions and repairs.
+const sparse=structuredClone(s);sparse.logs=[1,2,3].map(i=>log('sparse'+i,addDays(date,-i)));
+assert.equal(weekProposal(sparse,date).baseline,sparse.profile.weeklyRunMinutes);
+const stable=applyAction(s,'week-decision',{id:p.id,status:'approved'},date);
+const futureSession=sessions(stable.source)[0];stable.overrides=[{sessionId:futureSession.id,factor:0,reason:'Legacy pause',createdAt:''}];
+assert(!weekProposal(stable,date).decided,'saved zero override must not hide the apply action');
+const repair=planRepairs(stable,date)[0];assert(repair.canRestore);
+const repaired=applyAction(stable,'session-restore',{id:repair.id,token:repair.token},date);
+assert.equal(effective(repaired,sessions(repaired.source)[0]).factor,1);assert.deepEqual(repaired.logs,stable.logs);validateBackup(repaired);
+const undoRepair=applyAction(repaired,'week-undo',{id:repaired.weekDecisions.at(-1).id},date);assert.deepEqual(undoRepair.overrides,stable.overrides);
+const pausedSource=structuredClone(stable);pausedSource.overrides=[];pausedSource.weekDecisions=[{id:'legacy',start:p.start,status:'approved',createdAt:'',reason:'Legacy generated pause',before:structuredClone(stable.source)}];
+pausedSource.source.sheets.find(x=>x.name==='Calendario').rows[1][3]='Musculação: pausa por recuperação';pausedSource.source.sheets.find(x=>x.name==='Calendario').rows[1][7]=0;
+const fromSnapshot=planRepairs(pausedSource,date)[0];assert(fromSnapshot.canRestore);const recovered=applyAction(pausedSource,'session-restore',{id:fromSnapshot.id,token:fromSnapshot.token},date);assert(sessions(recovered.source)[0].minutes>0);validateBackup(recovered);
+const noHistory=structuredClone(pausedSource);noHistory.weekDecisions=[];assert(!planRepairs(noHistory,date)[0].canRestore);
+const changedRepair=structuredClone(stable);changedRepair.logs.push(log('new-log',futureSession.date));assert.throws(()=>applyAction(changedRepair,'session-restore',{id:repair.id,token:repair.token},date));
+const skipped=structuredClone(partial);skipped.logs.push({...log('skip','2026-11-03'),status:'skipped'});assert.equal(weekProposal(skipped,wed,'current').retainedRun,0);
+assert(!proposals({...s,checkins:[{date,sleep:8,recovery:4,pain:5,alert:false,notes:'',updatedAt:''}],source:stable.source},date).some(x=>x.factor===0&&x.date>date));
+console.log('PASS AUDIT: sparse logs, hidden zero overrides, overlay/snapshot restore, undo, no guessed source, stale repair, skipped load and no future blanket pause proposals.');
+
+const fs=await import('node:fs'),ts=await import('typescript'),React=await import('react'),{renderToStaticMarkup}=await import('react-dom/server');
+const ui=ts.default.transpileModule(fs.readFileSync('app/weekly-planner.tsx','utf8'),{compilerOptions:{target:ts.default.ScriptTarget.ES2022,module:ts.default.ModuleKind.ES2022,jsx:ts.default.JsxEmit.ReactJSX}}).outputText.replace(/from ['"]\.\.\/lib\/(planner|domain)['"]/g, "from './$1.mjs'");
+fs.writeFileSync('.qa/weekly-planner.mjs',ui);const {default:WeeklyPlanner,PlanRepair}=await import('../.qa/weekly-planner.mjs');
+const repairHtml=renderToStaticMarkup(React.createElement(PlanRepair,{s:stable,now:date,busy:false,save:async()=>true}));assert(repairHtml.includes('Restaurar este treino'));assert(!repairHtml.includes('disabled=""'));
+const html=renderToStaticMarkup(React.createElement(WeeklyPlanner,{s:stable,now:date,busy:false,save:async()=>true}));assert(html.includes('Aplicar estes treinos'));assert(!html.includes('disabled=""'));
+console.log('PASS UI: saved pause exposes restore action, review exposes enabled apply action. Server rendering only; no phone-browser claim.');
