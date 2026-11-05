@@ -54,9 +54,10 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const deload=!taper&&cycle%4===3;
  const factor=pause?0:reduce?.65:taper?.6:deload?.75:eligible?1.1:1;
  const budget=Math.max(0,Math.floor(baseline*factor));
- const long=Math.min(120,Math.floor(runLong*(eligible&&!deload&&!taper?1.1:Math.min(1,factor))),Math.floor(budget*.5));
+ const long=Math.min(120,Math.floor(runLong*(eligible&&!deload&&!taper?1.1:Math.min(1,factor))),Math.floor(budget*.4));
  const brick=Math.min(45,Math.floor(budget*.2));
- const quality=Math.max(0,budget-long-brick);
+ const easy=Math.floor(budget*.1);
+ const quality=Math.max(0,budget-long-brick-easy);
  const bikeProgress=eligible&&bikes.filter(l=>l.date>=addDays(date,-14)).length>=3&&!(eligible&&long>runLong);
  const sundayBike=pause?0:Math.min(210,Math.round(bikeLong*(bikeProgress?1.1:Math.min(1,factor))));
  const midBike=pause?0:Math.round(Math.min(60,bikeLong*.5)*Math.min(1,factor));
@@ -92,8 +93,10 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
   const dose=forceText+(dow===3?'. RIR 4, sem falha; descanso 60–120 s. Dose inicial de readaptação: reavaliar após registrar dor e recuperação, não é volume definitivo.':'. RIR 2–3; sábado RIR 4. Descanso 60–120 s. Sem falha.');
   let name='Musculação '+day,run=0,bike=0,main='5 min de aquecimento + '+dose+'; terminar antes do limite de tempo.',intensity='Força RIR 2–3';
   if(dow===2){name=title+' + musculação';run=Math.min(quality,remainingRun);main=actualQuality?`10 min fáceis; ${blocks}; completar fácil até ${quality-5} min; 5 min fáceis finais. Total ${quality} min de corrida, incluindo recuperações.`:`${run} min totais fáceis, primeiros e últimos 5 min bem leves.`;intensity=actualQuality?'Corrida RPE 3–4; blocos 6–7':'Corrida RPE 3–4';}
-  if(dow===3){bike=midBike;name='Bike aeróbica + musculação de pernas';main=`${bike} min bike RPE 3–4; primeiros e últimos 5 min leves. Pernas: ${dose}`;intensity='Bike RPE 3–4';}
+  if(dow===3){bike=Math.ceil(midBike*.6);name='Bike aeróbica + musculação de pernas';main=`${bike} min bike RPE 3–4; primeiros e últimos 5 min leves. Pernas: ${dose}`;intensity='Bike RPE 3–4';}
   if(dow===4){run=Math.min(long,remainingRun);name='Corrida LONGÃO + musculação leve';main=`${run} min totais a RPE 3–4, sem final forte; primeiros e últimos 5 min bem leves. Pode intercalar 9 min corrida / 1 min caminhada dentro do total. Depois força curta: ${dose}`;intensity='Corrida RPE 3–4';}
+  if(dow===5){run=Math.min(easy,remainingRun);name='Corrida fácil curta + musculação de superiores';main=`${run} min de corrida fácil RPE 2–3; começar caminhando se necessário, sem tiros ou final forte. Tempo total inclui início e fim leves. ${dose}`;intensity='Corrida RPE 2–3';}
+  if(dow===6){bike=Math.floor(midBike*.4);name='Bike leve + musculação leve';main=`${bike} min bike RPE 2–3, terreno plano ou indoor com resistência funcional; sem sprints. ${dose}`;intensity='Bike RPE 2–3';}
   if(dow===0){run=Math.min(brick,remainingRun);bike=sundayBike;name='Simulado bike + corrida';main=`${bike} min bike RPE 3–4 (primeiros/últimos 10% leves); T2 até 5 min; ${run} min corrida RPE 3–4 começando mais leve. Não é prova semanal.`;intensity='Ambas RPE 3–4';}
   if(dow===2&&run<quality){main=`${run} min fáceis RPE 3–4; volume limitado pelo restante da semana.`;intensity='Corrida RPE 3–4';name='Corrida fácil + musculação';}
   if(pause){run=0;bike=0;name='Hoje: reavaliar antes de treinar';main=reason;}else if(needsReview){main+=' Proposta condicional: realizar somente após resolução dos sintomas; se persistirem, não executar e reavaliar. Sinais de alerta exigem avaliação antes de retomar.';}
