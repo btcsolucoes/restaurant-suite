@@ -1,4 +1,4 @@
-import WeeklyPlanner from './weekly-planner';
+import WeeklyPlanner,{PlanRepair} from './weekly-planner';
 import {goalProjection} from '@/lib/adaptive';
 'use client';
 import { useEffect, useState, useRef, useMemo, FormEvent, ReactNode } from 'react';
@@ -43,6 +43,7 @@ export default function App(){
     <PhoneTools install={install} blocked={!!modal||busy} compact={view!=='data'}/>
     {error&&<div className="error-banner" role="alert"><AlertTriangle size={19}/><span>{error}</span><button onClick={load} className="text-btn">Recarregar</button><button className="icon-btn" onClick={()=>setError('')} aria-label="Fechar erro"><X size={16}/></button></div>}
     {!loaded?<div className="loading"><LoaderCircle className="spin"/><p>Preparando seu centro de treinamento…</p></div>:unauth?<div className="card auth-card"><ShieldCheck size={36}/><h2>Seu treinamento, em um espaço privado.</h2><p>Entre com sua conta para carregar o plano e salvar seus registros entre dispositivos.</p><a className="btn" href="/signin-with-chatgpt?return_to=/" target="_top">Entrar com ChatGPT <ArrowRight size={17}/></a></div>:!c?<Empty title="Não foi possível carregar o plano"><button className="text-btn" onClick={load}>Tentar novamente</button></Empty>:<>
+    {(view==='today'||view==='adaptive')&&<PlanRepair s={c.s} now={c.now} busy={c.busy} save={c.save}/>}
     {(view==='adaptive'||!sessions(c.s.source).length)&&<WeeklyPlanner s={c.s} now={c.now} busy={c.busy} save={c.save} onCheckin={()=>c.open({type:'checkin'})}/>}
     {!sessions(c.s.source).length?<section className="card onboarding-plan"><span className="soft-icon green"><FileSpreadsheet size={28}/></span><h2>Seu plano, no seu telefone.</h2><p>Configure seu perfil acima para montar a próxima semana. Você também pode importar um plano ou restaurar um backup. Os dados ficam neste aparelho.</p><Btn onClick={()=>setModal({type:'import'})}><Upload size={17}/>Importar meu plano</Btn><p className="muted">Já registrou treinos na versão anterior? Exporte o backup XLSX em Meus dados e importe aqui para transferir o histórico completo.</p></section>:<>{view==='today'&&<Dashboard c={c}/>}{view==='calendar'&&<Calendar c={c}/>}{view==='training'&&<Training c={c}/>}{view==='strength'&&<Strength c={c}/>}{view==='nutrition'&&<Nutrition c={c}/>}{view==='progress'&&<Progress c={c}/>}{view==='adaptive'&&<Adaptive c={c}/>}{view==='data'&&<DataPage c={c} install={install}/>}</>}
     </>}
