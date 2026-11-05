@@ -107,7 +107,7 @@ export function validateBackup(d: State){
   if(d?.schemaVersion!==1)fail('Versão de backup incompatível.');
   if(d.profile)validateProfile(d.profile);
   if(d.weekDecisions&&(!Array.isArray(d.weekDecisions)||d.weekDecisions.length>24))fail('Histórico semanal inválido.');
-  d.weekDecisions?.forEach(w=>{id(w.id);validDate(w.start);if(!['approved','rejected','undone'].includes(w.status)||typeof w.reason!=='string'||w.reason.length>20000)fail('Decisão semanal inválida.');if(w.before&&validateSource(w.before).errors.some(e=>e!=='Nenhuma sessão com data válida.'))fail('Fonte anterior inválida.');});
+  d.weekDecisions?.forEach(w=>{id(w.id);validDate(w.start);if(w.dates!==undefined){if(!Array.isArray(w.dates)||w.dates.length>7)fail('Datas da revisão inválidas.');w.dates.forEach(dt=>{validDate(dt);if(dt<w.start||dt>addDays(w.start,6))fail('Data fora da revisão.');});}if(!['approved','rejected','undone'].includes(w.status)||typeof w.reason!=='string'||w.reason.length>20000)fail('Decisão semanal inválida.');if(w.before&&validateSource(w.before).errors.some(e=>e!=='Nenhuma sessão com data válida.'))fail('Fonte anterior inválida.');});
   const v=validateSource(d.source);const sourceErrors=v.errors.filter(e=>e!=='Nenhuma sessão com data válida.');if(sourceErrors.length)fail(sourceErrors.join(' '));
   for(const key of ['logs','strength','meals','checkins','overrides','decisions'] as const)if(!Array.isArray(d[key])||d[key].length>20000)fail('Estrutura do backup inválida.');
   if(d.archives&&(!Array.isArray(d.archives)||d.archives.length>8||d.archives.some(a=>validateSource(a.source).errors.length)))fail('Archives inválidos.');

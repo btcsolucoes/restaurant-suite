@@ -1,7 +1,7 @@
 import {addDays,dateKey,sessions,sheetRows,today,effective,type State,type Source} from './domain';
 
 export type AthleteProfile={goalDate:string;runKm:number;bikeKm:number;runPaceSeconds:number;bikeSpeed:number;weeklyRunMinutes:number;longRunMinutes:number;bikeMinutes:number;strengthMinutes:number;anchor:string};
-export type WeekDecision={id:string;start:string;status:'approved'|'rejected'|'undone';createdAt:string;reason:string;before?:Source;beforeOverrides?:State['overrides'];after?:string};
+export type WeekDecision={id:string;start:string;dates?:string[];status:'approved'|'rejected'|'undone';createdAt:string;reason:string;before?:Source;beforeOverrides?:State['overrides'];after?:string};
 export const defaultProfile=(date=today()):AthleteProfile=>({goalDate:'2026-12-31',runKm:21.1,bikeKm:90,runPaceSeconds:320,bikeSpeed:30,weeklyRunMinutes:70,longRunMinutes:35,bikeMinutes:60,strengthMinutes:40,anchor:date});
 export function validateProfile(p:AthleteProfile){
  if(!p||dateKey(p.goalDate)!==p.goalDate||dateKey(p.anchor)!==p.anchor)throw Error('Datas do perfil inválidas.');
@@ -71,14 +71,15 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  const fueling='Manter dieta do nutricionista. Em sessões >75–90 min, praticar 30–60 g carboidrato/h conforme tolerância. Hidratar por sede e condições; não forçar excesso de água.';
  const totals={run:0,bike:0,strength:0};
  // A partial-week revision must account for completed runs and retained past sessions.
- const retainedRun=scope==='current'?Array.from({length:7},(_,i)=>addDays(monday,i)).filter(dt=>dt<start).reduce((sum,dt)=>{
+ const protectedDates=new Set([...s.logs.map(l=>l.date),...s.strength.map(l=>l.date)].filter(dt=>dt>=start&&dt<=end));
+ const retainedRun=Array.from({length:7},(_,i)=>addDays(monday,i)).filter(dt=>dt<start||protectedDates.has(dt)).reduce((sum,dt)=>{
   const actual=s.logs.filter(l=>l.date===dt&&l.kind==='run'&&l.status==='completed').reduce((n,l)=>n+l.duration,0);
   const planned=sessions(s.source).filter(x=>x.date===dt).reduce((n,x)=>{const target=Number(x.paceDetails?.[13]);return n+(Number.isFinite(target)&&target>0?target:/corrida|simulado/i.test(x.title)?effective(s,x).minutes:0);},0);
   return sum+Math.max(actual,planned);
- },0):0;
+ },0);
  let remainingRun=Math.max(0,budget-retainedRun);
  for(let i=0;i<7;i++){
-  const dt=addDays(start,i);if(dt>p.goalDate||dt>end)break;
+  const dt=addDays(start,i);if(dt>p.goalDate||dt>end)break;if(protectedDates.has(dt))continue;
   const dow=new Date(dt+'T12:00:00Z').getUTCDay(),day=days[dow],week=`P${cycle+1}`;
   const force=pause||dow===0?0:Math.round(([2,4].includes(dow)?20:dow===3?20:dow===6?25:p.strengthMinutes)*Math.min(1,factor));
   const forceText=pause?'Pausa por recuperação':exercises.filter(x=>x[0]===day).map(x=>`${x[1]} ${deload||taper||reduce?1:x[2]}×${x[3]}`).join('; ');
@@ -104,16 +105,17 @@ export function weekProposal(s:State,date=today(s.settings.timezone),scope:'curr
  for(const [name,incoming] of [['Calendario',cal],['Paces por Corrida',paces],['Domingos e Evento',bricks],['Nutricao por Data',nutrition]] as [string,any[][]][]){
   let sh=source.sheets.find(x=>x.name===name);if(!sh){sh={name,rows:[incoming[0]]};source.sheets.push(sh);}
   // Replace in place to preserve date/row-based session IDs, including untouched history.
-  for(let i=1;i<sh.rows.length;i++){const dt=dateKey(sh.rows[i][0]);if(dt>=start&&dt<=end&&!incoming.some(r=>r[0]===dt))sh.rows[i]=[];}
+  for(let i=1;i<sh.rows.length;i++){const dt=dateKey(sh.rows[i][0]);if(dt>=start&&dt<=end&&!protectedDates.has(dt)&&!incoming.some(r=>r[0]===dt))sh.rows[i]=[];}
   for(const row of incoming.slice(1)){const existing=sh.rows.findIndex((r,i)=>i>0&&dateKey(r[0])===row[0]);if(existing<0)sh.rows.push(row);else{sh.rows[existing]=row;for(let j=existing+1;j<sh.rows.length;j++)if(dateKey(sh.rows[j][0])===row[0])sh.rows[j]=[];}}
  }
  let ms=source.sheets.find(x=>x.name==='Musculacao');if(!ms){ms={name:'Musculacao',rows:[strength[0]]};source.sheets.push(ms);}
  // Date-specific rows coexist with historical weekday routines.
- ms.rows=ms.rows.filter((r,i)=>i===0||!(dateKey(r[6])>=start&&dateKey(r[6])<=end));ms.rows.push(...strength.slice(1));
+ ms.rows=ms.rows.filter((r,i)=>i===0||!(dateKey(r[6])>=start&&dateKey(r[6])<=end&&!protectedDates.has(dateKey(r[6]))));ms.rows.push(...strength.slice(1));
  const token=digest({date,scope,profile:p,logs:s.logs,checkins:s.checkins,strength:s.strength,source:s.source,overrides:s.overrides});
  const id=`week:${start}:${token}`;
- const locked=s.logs.some(l=>l.date>=start&&l.date<=end)||s.strength.some(l=>l.date>=start&&l.date<=end);
- return {id,start,end,scope,retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,locked,decided:!!s.weekDecisions?.some(x=>x.id===id||(x.start===start&&x.status==='approved'&&x.after===digest({source:s.source,overrides:s.overrides}))),quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
+ const dates=cal.slice(1).map(r=>String(r[0]));
+ const locked=dates.length===0;
+ return {id,start,end,scope,dates,protectedDates:[...protectedDates],retainedRun,budget,reason,source,totals,eligible,deload,taper,pause,locked,decided:!!s.weekDecisions?.some(x=>(x.id===id&&x.status==='approved')||(x.start===start&&x.status==='approved'&&x.after===digest({source:s.source,overrides:s.overrides}))),quality:actualQuality?blocks:'Fácil: consolidar tolerância',baseline,runLong,bikeLong,summary:cal.slice(1),evidence:JSON.stringify({date,baseline,twoWeeks,runLong,bikeLong,eligible,checks:checks.length,logs:logs.length})};
 }
 export function applyWeekAction(s:State,action:string,d:any,date:string){
  if(action==='profile'){validateProfile(d);s.profile={...d,anchor:s.profile?.anchor||date};return;}
@@ -121,13 +123,13 @@ export function applyWeekAction(s:State,action:string,d:any,date:string){
   if(d.scope!==undefined&&!['current','next'].includes(d.scope))throw Error('Período inválido.');
   const p=weekProposal(s,date,d.scope||'next');if(!p||p.id!==d.id||p.decided||p.locked)throw Error('Proposta expirada ou semana já registrada. Gere uma nova prévia.');
   if(!['approved','rejected'].includes(d.status))throw Error('Decisão inválida.');
-  const entry:WeekDecision={id:p.id,start:p.start,status:d.status,createdAt:new Date().toISOString(),reason:p.reason+' '+p.evidence};
-  if(d.status==='approved'){entry.before=structuredClone(s.source);entry.beforeOverrides=structuredClone(s.overrides);s.source=p.source;const ids=sessions(s.source).filter(x=>x.date>=p.start&&x.date<=p.end).map(x=>x.id);s.overrides=s.overrides.filter(o=>!ids.includes(o.sessionId));entry.after=digest({source:s.source,overrides:s.overrides});}
+  const entry:WeekDecision={id:p.id,start:p.start,dates:p.dates,status:d.status,createdAt:new Date().toISOString(),reason:p.reason+' '+p.evidence};
+  if(d.status==='approved'){entry.before=structuredClone(s.source);entry.beforeOverrides=structuredClone(s.overrides);s.source=p.source;const ids=sessions(s.source).filter(x=>p.dates.includes(x.date)).map(x=>x.id);s.overrides=s.overrides.filter(o=>!ids.includes(o.sessionId));entry.after=digest({source:s.source,overrides:s.overrides});}
   s.weekDecisions=[...(s.weekDecisions||[]),entry].slice(-24);return;
  }
  if(action==='week-undo'){
   const e=s.weekDecisions?.find(x=>x.id===d.id&&x.status==='approved');
-  if(!e?.before||digest({source:s.source,overrides:s.overrides})!==e.after||s.logs.some(l=>l.date>=e.start&&l.date<=addDays(e.start,6))||s.strength.some(l=>l.date>=e.start&&l.date<=addDays(e.start,6)))throw Error('Não é possível desfazer após novos planos ou registros na semana. O histórico foi preservado.');
+  if(!e?.before||digest({source:s.source,overrides:s.overrides})!==e.after||s.logs.some(l=>(e.dates?e.dates.includes(l.date):l.date>=e.start&&l.date<=addDays(e.start,6)))||s.strength.some(l=>(e.dates?e.dates.includes(l.date):l.date>=e.start&&l.date<=addDays(e.start,6))))throw Error('Não é possível desfazer após novos planos ou registros na semana. O histórico foi preservado.');
   s.source=e.before;s.overrides=e.beforeOverrides||[];e.status='undone';return;
  }
  throw Error('Ação semanal inválida.');

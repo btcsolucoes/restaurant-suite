@@ -11,13 +11,13 @@ assert.deepEqual(s,old,'preview and approval are immutable');assert.equal(sessio
 validateBackup(approved);assert.throws(()=>applyAction(approved,'week-decision',{id:p.id,status:'approved'},date),/expirada/);
 let undone=applyAction(approved,'week-undo',{id:p.id},date);assert.deepEqual(undone.source,old.source);validateBackup(undone);
 const stale=structuredClone(s);stale.checkins.push({date,sleep:5,recovery:1,pain:0,alert:false,notes:'',updatedAt:'new'});assert.throws(()=>applyAction(stale,'week-decision',{id:p.id,status:'approved'},date),/expirada/);
-let reject=applyAction(s,'week-decision',{id:p.id,status:'rejected'},date);assert.deepEqual(reject.source,s.source);assert(weekProposal(reject,date).decided);
+let reject=applyAction(s,'week-decision',{id:p.id,status:'rejected'},date);assert.deepEqual(reject.source,s.source);assert(!weekProposal(reject,date).decided);
 const log=(id,day,kind='run',duration=30)=>({id,date:day,sessionId:'',kind,status:'completed',distance:kind==='run'?duration/7:0,duration,hr:null,rpe:4,pain:0,notes:'',createdAt:''});
 let rich=structuredClone(s);rich.profile.weeklyRunMinutes=90;
 for(let i=0;i<14;i++){rich.checkins.push({date:addDays(date,-i),sleep:8,recovery:4,pain:0,alert:false,notes:'',updatedAt:String(i)});if(i%2===0)rich.logs.push(log('r'+i,addDays(date,-i)));}
 let grow=weekProposal(rich,date);assert(grow.eligible);assert(grow.totals.run<=Math.min(90,120)*1.1);assert(grow.quality.includes('×'));assert(grow.summary.find(r=>r[1]==='Qua')[4].includes('indoor'));
 rich.logs.push({...log('pain',date),pain:4});const paused=weekProposal(rich,date);assert(paused.pause);assert.equal(paused.totals.run+paused.totals.bike+paused.totals.strength,0);
-const future=log('future',p.start);let locked={...s,logs:[future]};assert(weekProposal(locked,date).locked);assert.throws(()=>applyAction(locked,'week-decision',{id:weekProposal(locked,date).id,status:'approved'},date),/expirada/);
+const future=log('future',p.start);let locked={...s,logs:[future]};assert(!weekProposal(locked,date).locked);assert(!weekProposal(locked,date).dates.includes(p.start));
 const planned=sessions(approved.source)[0];approved=applyAction(approved,'training',{...log('completed',planned.date,'strength',40),sessionId:planned.id},date);assert.throws(()=>applyAction(approved,'week-undo',{id:p.id},date),/desfazer/);
 const tue=sessions(approved.source)[1];let mixed=applyAction(approved,'training',{...log('tue-run',tue.date),sessionId:tue.id},date);assert.equal(adherence(mixed,tue.date,tue.date).done,0);mixed=applyAction(mixed,'training',{...log('tue-strength',tue.date,'strength',20),sessionId:tue.id},date);assert.equal(adherence(mixed,tue.date,tue.date).done,1);assert.equal(effective(mixed,tue).runKm,null);
 assert.equal(runningTrend(s,date),null);let t=structuredClone(s);for(const offset of [1,3,5,15,17,19])t.logs.push({...log('t'+offset,addDays(date,-offset),'run',30),distance:offset<14?5:4.5,environment:'outdoor',workoutType:'easy'});assert(runningTrend(t,date).change>0);t.logs.forEach(x=>x.workoutType='brick');assert.equal(runningTrend(t,date),null);
@@ -35,5 +35,12 @@ const fixed=applyAction(partial,'week-decision',{id:current.id,scope:'current',s
 const restored=applyAction(fixed,'week-undo',{id:current.id},wed);assert.deepEqual(restored.source,partial.source);
 assert.throws(()=>applyAction(partial,'week-decision',{id:current.id,scope:'next',status:'approved'},wed));
 assert.equal(weekProposal(partial,'2026-11-08','current').summary.length,1);
-partial.logs.push(log('already',wed,'bike'));assert(weekProposal(partial,wed,'current').locked);
+partial.logs.push(log('already',wed,'bike'));
+const remaining=weekProposal(partial,wed,'current');assert(!remaining.locked);assert.equal(remaining.summary.length,4);assert(!remaining.dates.includes(wed));
+const kept=applyAction(partial,'week-decision',{id:remaining.id,scope:'current',status:'approved'},wed);assert.deepEqual(kept.logs,partial.logs);assert.deepEqual(kept.source.sheets[0].rows[2],partial.source.sheets[0].rows[2]);
+assert.deepEqual(applyAction(kept,'week-undo',{id:remaining.id},wed).source,partial.source);
+const allRecorded=structuredClone(partial);for(let i=1;i<5;i++)allRecorded.logs.push(log('done'+i,addDays(wed,i)));assert(weekProposal(allRecorded,wed,'current').locked);
+const declined=applyAction(partial,'week-decision',{id:remaining.id,scope:'current',status:'rejected'},wed);assert(!weekProposal(declined,wed,'current').decided);
+validateBackup(kept);assert.throws(()=>validateBackup({...kept,weekDecisions:[{...kept.weekDecisions[0],dates:['invalid']}]}));
+
 console.log('PASS: current-week revision, Sunday boundary, retained load, dated strength, undo and scope validation.');
